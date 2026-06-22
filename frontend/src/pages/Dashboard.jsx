@@ -1,10 +1,8 @@
 import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import Header from '../components/Header.jsx'
 
 export default function Dashboard({ isLoggedIn, userEmail, handleLogout }) {
-  const navigate = useNavigate()
-
-  // KIS API Key 입력 상태
+  // KIS API Key 입력 상태 (한글 주석 준수)
   const [inputs, setInputs] = useState({
     appkey: '',
     appsecret: '',
@@ -85,45 +83,9 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#0F172A] text-[#e2e2ec] font-inter px-6 py-8">
-      {/* 공통 상단 네비게이션 헤더 */}
-      <header className="max-w-7xl mx-auto mb-8 border-b border-slate-800 pb-4 flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-3">
-            <img src="/logo.png" alt="Logo" className="w-8 h-8 object-contain" />
-            <span>SYNTHETIC INTELLIGENCE TERMINAL</span>
-            <span className="text-xs px-2 py-0.5 rounded border border-ai-cyan text-ai-cyan font-mono font-medium animate-pulse">
-              MOCK TRADING
-            </span>
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">Multi-Asset Trading 어시스턴트 통합 대시보드</p>
-        </div>
-        <div className="flex items-center gap-6">
-          <span className="hidden md:inline text-xs font-mono text-slate-500">SYSTEM TIME: 2026-06-22T14:41:11</span>
-          
-          {/* 헤더 인증 상태 액션 */}
-          <div className="flex items-center gap-4">
-            {isLoggedIn ? (
-              <div className="flex items-center gap-3 bg-[#1E293B] border border-slate-700/50 rounded-full pl-3 pr-1 py-1 text-xs">
-                <span className="text-slate-300 font-medium truncate max-w-[150px]">{userEmail}</span>
-                <button 
-                  onClick={handleLogout}
-                  className="bg-[#0F172A] hover:bg-red-950/20 hover:text-red-400 text-slate-400 text-[11px] font-bold px-3 py-1 rounded-full border border-slate-700/60 transition-colors cursor-pointer"
-                >
-                  LOGOUT
-                </button>
-              </div>
-            ) : (
-              <button 
-                onClick={() => navigate('/login')}
-                className="bg-transparent hover:bg-ai-cyan/10 text-ai-cyan text-xs font-bold px-4 py-1.5 rounded border border-ai-cyan/80 hover:border-ai-cyan transition-all cursor-pointer"
-              >
-                LOGIN
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen bg-obsidian-bg text-[#e2e2ec] font-inter px-6 py-8">
+      {/* 공통 통합 네비게이션 헤더 */}
+      <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} />
 
       {/* 메인 레이아웃 그리드 */}
       <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -227,21 +189,21 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout }) {
           
           {/* 대시보드 요약 카드 */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-[#1E293B] border border-slate-700 rounded-lg p-5">
+            <div className="bg-slate-surface border border-slate-700 rounded-lg p-5">
               <span className="text-xs font-bold text-slate-400">총 평가 자산 (KRW)</span>
               <div className="text-2xl font-bold font-mono text-white mt-1">
                 {balance ? balance.total_evaluation.toLocaleString() : '0'}
               </div>
             </div>
             
-            <div className="bg-[#1E293B] border border-slate-700 rounded-lg p-5">
+            <div className="bg-slate-surface border border-slate-700 rounded-lg p-5">
               <span className="text-xs font-bold text-slate-400">가용 예수금 (Cash)</span>
               <div className="text-2xl font-bold font-mono text-white mt-1">
                 {balance ? balance.available_cash.toLocaleString() : '0'}
               </div>
             </div>
             
-            <div className="bg-[#1E293B] border border-slate-700 rounded-lg p-5">
+            <div className="bg-slate-surface border border-slate-700 rounded-lg p-5">
               <span className="text-xs font-bold text-slate-400">포트폴리오 수익률</span>
               <div className={`text-2xl font-bold font-mono mt-1 ${
                 balance && balance.holdings.length > 0
@@ -254,7 +216,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout }) {
           </div>
 
           {/* 보유 종목 테이블 리스트 */}
-          <div className="bg-[#1E293B] border border-slate-700 rounded-lg p-6 flex flex-col gap-4 flex-1">
+          <div className="bg-slate-surface border border-slate-700 rounded-lg p-6 flex flex-col gap-4 flex-1">
             <div className="flex justify-between items-center border-b border-slate-700 pb-2">
               <h2 className="text-lg font-semibold text-white flex items-center gap-2">
                 <span className="w-2 h-2 rounded bg-indigo-500"></span>
@@ -276,7 +238,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout }) {
                 <table className="w-full text-left border-collapse text-sm">
                   <thead>
                     <tr className="border-b border-slate-800 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                      <th className="py-2.5 px-3">종목명/티커</th>
+                      <th className="py-2.5 px-3">종목명/코드</th>
                       <th className="py-2.5 px-3 text-right">보유수량</th>
                       <th className="py-2.5 px-3 text-right">평균단가</th>
                       <th className="py-2.5 px-3 text-right">현재가</th>

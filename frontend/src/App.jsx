@@ -4,6 +4,7 @@ import { supabase } from './supabaseClient'
 import Dashboard from './pages/Dashboard'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+import News from './pages/News'
 
 // 10문항 투자 성향 설문 데이터 정의 (한글 주석 준수)
 const SURVEY_QUESTIONS = [
@@ -494,6 +495,16 @@ export default function App() {
           path="/" 
           element={
             <Dashboard 
+              isLoggedIn={isLoggedIn} 
+              userEmail={userEmail} 
+              handleLogout={handleLogout} 
+            />
+          } 
+        />
+        <Route 
+          path="/news" 
+          element={
+            <News 
               isLoggedIn={isLoggedIn} 
               userEmail={userEmail} 
               handleLogout={handleLogout} 

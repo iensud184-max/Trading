@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import Header from '../components/Header.jsx'
+import Settings from './Settings'
 
 // 등락률 표시 컴포넌트 (한글 주석 준수)
 function Rate({ value }) {
@@ -64,7 +65,7 @@ const DASHBOARD_TABS = [
   { key: 'watchlist', label: '관심종목', enabled: true },
   { key: 'assets', label: '내 자산', enabled: true },
   { key: 'history', label: '거래 내역', enabled: true },
-  { key: 'settings', label: '설정', enabled: false }
+  { key: 'settings', label: '설정', enabled: true }
 ]
 
 const WATCH_CHARTS_MOCK = {
@@ -1012,6 +1013,15 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
           {activeTab === 'watchlist' && <WatchlistTab />}
           {activeTab === 'assets' && <AssetsTab balance={balance} allocation={allocation} />}
           {activeTab === 'history' && <TradeHistoryTab />}
+          {activeTab === 'settings' && (
+            <Settings 
+              isLoggedIn={isLoggedIn} 
+              userEmail={userEmail} 
+              handleLogout={handleLogout} 
+              userProfile={userProfile} 
+              hideHeader={true}
+            />
+          )}
         </div>
       </div>
     </div>

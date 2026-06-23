@@ -80,11 +80,19 @@ teamproject/
   * Toss 관련 요청은 Flask 백엔드 REST API를 통해서만 수행합니다.
 * **`hooks/` 목표 구조**:
   * Supabase Realtime 채널을 리스닝하여 대시보드의 잔고나 매매 제안 상태를 실시간 업데이트하는 비동기 이벤트를 Custom Hook으로 분리합니다.
+* **통합 금융 차트 라이브러리 채택**:
+  * 주식(Toss, KIS) 및 코인(Coinone, Binance)의 실시간 캔들 차트를 그리기 위해 **TradingView Lightweight Charts**를 전면 채택합니다.
+  * 단일 리액트 차트 컴포넌트를 설계하여, 사용자의 거래소/종목/주기 변경 이벤트에 따라 동적으로 시세 데이터를 교체(setData)하는 고성능 비동기 방식으로 구현합니다.
 
 ### 2.2 백엔드 (`backend/`)
 
 * **`app.py` (API Gateway)**:
   * 프론트엔드와 챗봇의 모든 요청을 받아들이는 통로 역할을 수행하며, 세부 비즈니스 로직은 `services/`로 위임합니다.
+  * **통합 시세 조회 API (`GET /api/chart/candles`)**:
+    * 프론트엔드에 일관된 데이터 인터페이스를 제공하기 위한 게이트웨이 라우트입니다.
+    * 요청 파라미터(`exchange`, `symbol`, `interval`)에 맞추어 각각의 거래소 클라이언트를 동적으로 스위칭 호출합니다.
+    * 각 거래소마다 상이한 시간 및 가격 포맷을 융합하여 TradingView Lightweight Charts 규격(`time`, `open`, `high`, `low`, `close`)으로 변환(어댑터 패턴)하여 공통 규격의 JSON 배열로 반환합니다.
+    * 빈번한 중복 호출로 인한 거래소 API 차단(Rate Limit)을 예방하기 위해 백엔드 레벨에서 정적 캐싱(Caching)을 수행합니다.
 * **`services/toss_client.py` (현재 구현됨, 메인 주식 클라이언트)**:
   * Toss Open API의 인증, 시세, 종목 정보, 시장 정보, 계좌, 보유자산, 주문 전 검증, 주문, 주문 조회를 담당합니다.
   * `/oauth2/token` 토큰 발급은 form-urlencoded 방식으로 처리합니다.

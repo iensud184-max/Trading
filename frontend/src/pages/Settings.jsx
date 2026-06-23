@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import Header from '../components/Header.jsx'
 
-export default function Settings({ isLoggedIn, userEmail, handleLogout, userProfile }) {
+export default function Settings({ isLoggedIn, userEmail, handleLogout, userProfile, hideHeader }) {
   // 브로커 연동 현황 상태
   const [status, setStatus] = useState({
     TOSS: { registered: false },
@@ -368,7 +368,7 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
   return (
     <div className="min-h-screen bg-obsidian-bg text-[#e2e2ec] font-inter px-6 py-8">
       {/* 공통 상단 네비게이션 헤더 */}
-      <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} userProfile={userProfile} />
+      {!hideHeader && <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} userProfile={userProfile} />}
 
       <main className="max-w-4xl mx-auto flex flex-col gap-8 mt-6">
         

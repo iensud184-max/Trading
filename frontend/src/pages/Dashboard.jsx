@@ -59,6 +59,518 @@ const WATCHLIST_MOCK = [
   { id: 'TSLA', name: 'Tesla', market: '해외 주식', account: '해외 위탁', quantity: '3주', average: '$188.20', change: '-1.26%' }
 ];
 
+const DASHBOARD_TABS = [
+  { key: 'dashboard', label: '대시보드', enabled: true },
+  { key: 'watchlist', label: '관심종목', enabled: true },
+  { key: 'assets', label: '내 자산', enabled: true },
+  { key: 'history', label: '거래 내역', enabled: true },
+  { key: 'settings', label: '설정', enabled: false }
+]
+
+const WATCH_CHARTS_MOCK = {
+  '005930': [44, 47, 45, 51, 49, 55, 58, 62, 60, 66, 64, 71],
+  '000660': [38, 42, 46, 44, 53, 57, 63, 66, 70, 74, 78, 83],
+  NVDA: [52, 54, 51, 59, 62, 61, 66, 69, 73, 70, 76, 79],
+  TSLA: [70, 68, 66, 69, 64, 62, 60, 58, 61, 57, 55, 54]
+}
+
+const WATCH_NEWS_MOCK = [
+  { id: 'news-005930-1', watchlistId: '005930', source: '연합뉴스', title: '삼성전자, 메모리 가격 반등 기대에 외국인 수급 개선', summary: '반도체 업황 회복 기대와 AI 서버 수요 확대가 주가 흐름에 영향을 주고 있습니다.', publishedAt: '2026-06-23 09:30', url: '#' },
+  { id: 'news-005930-2', watchlistId: '005930', source: '한국경제', title: '대형 반도체주 중심으로 기관 매수세 유입', summary: '국내 증시에서는 실적 가시성이 높은 대형주 선호가 이어지고 있습니다.', publishedAt: '2026-06-23 10:10', url: '#' },
+  { id: 'news-000660-1', watchlistId: '000660', source: '매일경제', title: 'HBM 공급 전망 상향, SK하이닉스 실적 기대 확대', summary: 'AI 인프라 투자 확대가 고대역폭 메모리 수요 전망을 끌어올리고 있습니다.', publishedAt: '2026-06-23 11:05', url: '#' },
+  { id: 'news-NVDA-1', watchlistId: 'NVDA', source: 'Market Watch', title: 'NVIDIA, AI 반도체 수요 강세 지속', summary: '데이터센터 투자 확대가 GPU 수요 전망을 지지하고 있습니다.', publishedAt: '2026-06-23 12:20', url: '#' }
+]
+
+const ASSET_ACCOUNTS_MOCK = [
+  { id: 'krw-stock', title: '주식계좌', accountType: '원화', maskedAccountNumber: '123-45-****01', balanceLabel: '원화 잔고', balance: '1,186,900원' },
+  { id: 'usd-stock', title: '해외주식계좌', accountType: '달러', maskedAccountNumber: '987-65-****09', balanceLabel: '달러 잔고', balance: '$842.16' },
+  { id: 'coin-wallet', title: '코인계좌', accountType: '코인', maskedAccountNumber: 'UPBIT-****-001', balanceLabel: '코인 평가금', balance: '489,500원' }
+]
+
+const FALLBACK_HOLDINGS = [
+  { id: 'holding-005930', name: '삼성전자', account: '국내 주식', quantity: '18주', average: '72,400원', returnRate: '+2.14%', weight: 26 },
+  { id: 'holding-000660', name: 'SK하이닉스', account: '국내 주식', quantity: '6주', average: '182,000원', returnRate: '+7.82%', weight: 24 },
+  { id: 'holding-NVDA', name: 'NVIDIA', account: '해외 주식', quantity: '4주', average: '$126.40', returnRate: '+4.31%', weight: 14 },
+  { id: 'holding-TSLA', name: 'Tesla', account: '해외 주식', quantity: '3주', average: '$188.20', returnRate: '-1.26%', weight: 12 },
+  { id: 'holding-BTC', name: 'Bitcoin', account: '코인', quantity: '0.0038 BTC', average: '128,600,000원', returnRate: '+3.18%', weight: 9 }
+]
+
+const TRADE_HISTORY_MOCK = [
+  { id: 'trade-1', date: '2026-06-23', time: '14:18:35', exchange: 'TOSS', symbolName: '삼성전자', ticker: '005930', side: '매수', currency: 'KRW', price: '68,500', quantity: '100', amount: '₩6,850,000', status: '체결완료', exchangeRate: '-', fees: '1,370원', orderNumber: 'TOSS-260623-001' },
+  { id: 'trade-2', date: '2026-06-23', time: '11:02:10', exchange: 'KIS', symbolName: 'NVIDIA Corp', ticker: 'NVDA', side: '매도', currency: 'USD', price: '$425.10', quantity: '50', amount: '$21,255.00', status: '체결완료', exchangeRate: '1,385.50 KRW', fees: '185원', orderNumber: 'KIS-260623-118' },
+  { id: 'trade-3', date: '2026-06-22', time: '15:21:44', exchange: 'COINONE', symbolName: 'Bitcoin', ticker: 'BTC/KRW', side: '매수', currency: 'KRW', price: '45,200,000', quantity: '0.5', amount: '₩22,600,000', status: '체결완료', exchangeRate: '-', fees: '11,300원', orderNumber: 'COIN-260622-039' },
+  { id: 'trade-4', date: '2026-06-22', time: '08:45:00', exchange: 'BINANCE', symbolName: 'Ethereum', ticker: 'ETH/USDT', side: '매도', currency: 'USD', price: '$1,780.50', quantity: '10.0', amount: '$17,805.00', status: '미체결', exchangeRate: '1,385.50 KRW', fees: '$8.90', orderNumber: 'BN-260622-204' },
+  { id: 'trade-5', date: '2026-06-21', time: '09:41:08', exchange: 'TOSS', symbolName: 'SK하이닉스', ticker: '000660', side: '매수', currency: 'KRW', price: '124,000', quantity: '200', amount: '₩24,800,000', status: '체결완료', exchangeRate: '-', fees: '4,960원', orderNumber: 'TOSS-260621-091' }
+]
+
+// 사이드 바 관리
+function SidebarNav({ activeTab, isOpen, onClose, onOpen, onTabChange }) {
+  if (!isOpen) {
+    return (
+      <button
+        className="fixed left-4 top-4 z-40 grid h-11 w-11 place-items-center rounded-lg border border-slate-700 bg-[#0F172A] text-lg font-black text-white shadow-xl transition hover:border-ai-cyan hover:text-ai-cyan"
+        type="button"
+        aria-label="사이드바 열기"
+        onClick={onOpen}
+      >
+        ☰
+      </button>
+    )
+  }
+
+  return (
+    <aside className="shrink-0 border-b border-slate-800 bg-[#0F172A] lg:min-h-screen lg:w-64 lg:border-b-0 lg:border-r">
+      <div className="sticky top-0 flex gap-3 overflow-x-auto p-4 lg:h-screen lg:flex-col lg:overflow-visible lg:p-5">
+        <div className="flex items-center gap-3 lg:pb-5">
+          <span className="grid h-10 w-10 place-items-center overflow-hidden rounded-lg">
+            <img className="h-full w-full object-contain" src="/logo.png" alt="Trading AI" />
+          </span>
+          <div className="min-w-28">
+            <p className="text-sm font-extrabold text-white">AE STOCK</p>
+            <p className="text-xs text-slate-500">Dashboard</p>
+          </div>
+          <button
+            className="ml-auto grid h-8 w-8 place-items-center rounded-lg border border-slate-700 text-lg font-black text-slate-400 transition hover:border-ai-cyan hover:text-white"
+            type="button"
+            aria-label="사이드바 닫기"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+
+        {DASHBOARD_TABS.map((tab) => (
+          <button
+            key={tab.key}
+            className={`shrink-0 rounded-lg px-4 py-3 text-left text-sm font-bold transition ${
+              activeTab === tab.key
+                ? 'bg-institutional-blue text-white shadow-[0_10px_24px_rgba(0,71,187,0.25)]'
+                : tab.enabled
+                  ? 'text-slate-400 hover:bg-white/5 hover:text-white'
+                  : 'cursor-default text-slate-600'
+            }`}
+            type="button"
+            onClick={() => {
+              if (tab.enabled) onTabChange(tab.key)
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+
+        <div className="mt-auto hidden rounded-lg border border-ai-cyan/20 bg-white/[0.04] p-4 lg:block">
+          <p className="text-xs font-bold text-ai-cyan">AI Layer</p>
+          <p className="mt-2 text-sm leading-6 text-slate-300">매매 제안은 사용자 승인 전까지 실행되지 않습니다.</p>
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+
+function MiniSparkline({ values = [], height = 'h-52' }) {
+  const points = values
+    .map((val, index) => `${(index / Math.max(values.length - 1, 1)) * 100},${110 - val}`)
+    .join(' ')
+
+  if (!values.length) {
+    return <div className={`${height} grid place-items-center text-xs text-slate-500`}>차트 데이터가 없습니다.</div>
+  }
+
+  return (
+    <svg className={`${height} w-full`} viewBox="0 0 100 56" preserveAspectRatio="none" role="img" aria-label="관심종목 가격 흐름">
+      <defs>
+        <linearGradient id="watchFill" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor="#00e0ff" stopOpacity="0.24" />
+          <stop offset="100%" stopColor="#00e0ff" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polyline points={`0,56 ${points} 100,56`} fill="url(#watchFill)" stroke="none" />
+      <polyline points={points} fill="none" stroke="#00e0ff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+
+function WatchlistTab() {
+  const [selectedId, setSelectedId] = useState(WATCHLIST_MOCK[0]?.id || '')
+  const selectedItem = WATCHLIST_MOCK.find((item) => item.id === selectedId) || WATCHLIST_MOCK[0]
+  const visibleNews = WATCH_NEWS_MOCK.filter((news) => news.watchlistId === selectedItem?.id).slice(0, 4)
+  const useSlider = WATCHLIST_MOCK.length >= 5
+
+  return (
+    <main className="max-w-7xl mx-auto flex flex-col gap-6">
+      <section className="bg-slate-surface border border-slate-700/80 rounded-lg p-5">
+        <SectionHeader title="관심종목 명단" />
+        <div className={useSlider ? 'flex snap-x gap-2 overflow-x-auto pb-2' : 'grid gap-2 md:grid-cols-2 xl:grid-cols-4'}>
+          {WATCHLIST_MOCK.map((item) => (
+            <button
+              key={item.id}
+              className={`${useSlider ? 'min-w-60 snap-start' : 'w-full'} rounded-lg px-4 py-3 text-left transition ${
+                selectedItem?.id === item.id ? 'bg-institutional-blue text-white' : 'bg-[#0f172a] text-slate-300 hover:bg-white/5'
+              }`}
+              type="button"
+              onClick={() => setSelectedId(item.id)}
+            >
+              <span className="block font-bold">{item.name}</span>
+              <span className="mt-1 block text-xs opacity-70 font-mono">{item.market} · {item.account}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-slate-surface border border-slate-700/80 rounded-lg p-5">
+        <SectionHeader title="관심 종목의 차트" action={selectedItem?.id} />
+        <div className="rounded-lg border border-slate-800 bg-[#0f172a]/70 p-4">
+          <MiniSparkline values={WATCH_CHARTS_MOCK[selectedItem?.id]} />
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-5">
+          {[
+            ['종목명', selectedItem?.name],
+            ['계좌종류', selectedItem?.account],
+            ['수량', selectedItem?.quantity],
+            ['평균 단가', selectedItem?.average],
+            ['등락율', selectedItem?.change],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-lg bg-[#0f172a] p-4">
+              <p className="text-xs font-bold text-slate-500">{label}</p>
+              <p className="mt-2 font-bold text-white font-mono">{label === '등락율' ? <Rate value={value} /> : value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-slate-surface border border-slate-700/80 rounded-lg p-5">
+        <SectionHeader title="관심종목 관련 뉴스피드" />
+        <div className="grid gap-3 lg:grid-cols-2">
+          {visibleNews.map((news) => (
+            <article key={news.id} className="rounded-lg border border-slate-800 bg-[#0f172a] p-4">
+              <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
+                <span className="font-bold text-ai-cyan">{news.source}</span>
+                <span className="font-mono">{news.publishedAt}</span>
+              </div>
+              <h3 className="mt-3 text-sm font-bold leading-6 text-white">{news.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-400">{news.summary}</p>
+              <a className="mt-4 inline-flex rounded-lg bg-ai-cyan px-4 py-2 text-sm font-bold text-[#07111f] transition hover:bg-ai-cyan/80" href={news.url} rel="noreferrer" target="_blank">
+                원문 열기
+              </a>
+            </article>
+          ))}
+        </div>
+      </section>
+    </main>
+  )
+}
+
+function AssetsTab({ balance, allocation }) {
+  const displayAccounts = ASSET_ACCOUNTS_MOCK.map((account) => {
+    if (account.id !== 'krw-stock' || !balance) return account
+
+    return {
+      ...account,
+      balance: `₩${(balance.available_cash || 0).toLocaleString()}`,
+    }
+  })
+  const holdings = balance?.holdings?.length
+    ? balance.holdings.map((stock) => ({
+        id: stock.symbol,
+        name: stock.name,
+        account: /[a-zA-Z]/.test(stock.symbol) ? '해외 주식' : '국내 주식',
+        quantity: `${stock.qty}`,
+        average: `₩${stock.avg_price.toLocaleString()}`,
+        returnRate: `${stock.profit_rate >= 0 ? '+' : ''}${stock.profit_rate.toFixed(2)}%`,
+      }))
+    : FALLBACK_HOLDINGS
+
+  return (
+    <main className="max-w-7xl mx-auto flex flex-col gap-6">
+      <section className="bg-slate-surface border border-slate-700/80 rounded-lg p-5">
+        <SectionHeader eyebrow="Private Asset" title="주식계좌 및 계좌번호" />
+        <div className="grid gap-3">
+          {displayAccounts.map((account) => (
+            <div key={account.id} className="rounded-lg border border-slate-800 bg-[#0f172a] p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-bold text-white">{account.title}</p>
+                    <span className="rounded-md bg-ai-cyan/10 px-2 py-1 text-xs font-bold text-ai-cyan">{account.accountType}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-400 font-mono">계좌번호 {account.maskedAccountNumber}</p>
+                </div>
+                <div className="md:text-right">
+                  <p className="text-xs font-bold text-slate-500">{account.balanceLabel}</p>
+                  <p className="mt-1 text-xl font-extrabold text-white font-mono">{account.balance}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-slate-surface border border-slate-700/80 rounded-lg p-5">
+        <SectionHeader title="보유자산 현황 및 자산 배분 상태" />
+        <div className="flex h-4 overflow-hidden rounded-full bg-[#0f172a]">
+          {allocation.map((item) => (
+            <span key={item.id} className={item.color} style={{ width: `${item.value}%` }} />
+          ))}
+        </div>
+        <div className="mt-5 grid gap-3">
+          {allocation.map((item) => (
+            <div key={item.id} className="rounded-lg bg-[#0f172a] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-2 text-sm font-bold text-white">
+                  <span className={`h-2 w-2 rounded-full ${item.color}`} />
+                  {item.label}
+                </span>
+                <span className="font-mono font-bold text-slate-300">{item.value}%</span>
+              </div>
+              <div className="mt-3 h-2 rounded-full bg-white/5">
+                <div className={`h-2 rounded-full ${item.color}`} style={{ width: `${item.value}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="bg-slate-surface border border-slate-700/80 rounded-lg overflow-hidden">
+        <div className="p-5 pb-2">
+          <SectionHeader title="투자종목 보유 현황" />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] border-collapse text-sm">
+            <thead className="border-y border-slate-800 bg-[#0f172a] text-xs text-slate-400">
+              <tr>
+                {['투자종목 명', '계좌 종류', '수량', '평균단가', '수익률'].map((head) => (
+                  <th key={head} className="px-5 py-3 text-left font-bold">{head}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {holdings.map((item) => (
+                <tr key={item.id} className="border-b border-slate-800/80 last:border-b-0">
+                  <td className="px-5 py-4 font-bold text-white">{item.name}</td>
+                  <td className="px-5 py-4 text-slate-300">{item.account}</td>
+                  <td className="px-5 py-4 font-mono">{item.quantity}</td>
+                  <td className="px-5 py-4 font-mono">{item.average}</td>
+                  <td className="px-5 py-4"><Rate value={item.returnRate} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  )
+}
+
+function TradeHistoryTab() {
+  const tradeHistory = TRADE_HISTORY_MOCK
+  const [selectedTrade, setSelectedTrade] = useState(null)
+  const [selectedExchange, setSelectedExchange] = useState('ALL')
+  const [dateRange, setDateRange] = useState({
+    start: '2026-06-21',
+    end: '2026-06-23',
+  })
+  const exchangeTone = {
+    TOSS: 'border-blue-500/40 bg-blue-500/15 text-blue-300',
+    KIS: 'border-rose-500/40 bg-rose-500/15 text-rose-300',
+    COINONE: 'border-sky-500/40 bg-sky-500/15 text-sky-300',
+    BINANCE: 'border-yellow-400/40 bg-yellow-400/15 text-yellow-300',
+  }
+  const filteredTrades = tradeHistory.filter((trade) => {
+    const exchangeMatched = selectedExchange === 'ALL' || trade.exchange === selectedExchange
+    const startMatched = !dateRange.start || trade.date >= dateRange.start
+    const endMatched = !dateRange.end || trade.date <= dateRange.end
+
+    return exchangeMatched && startMatched && endMatched
+  })
+
+  return (
+    <main className="relative max-w-7xl mx-auto flex flex-col gap-3">
+      <section className="rounded-lg border border-slate-700 bg-slate-surface/90 p-2">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-1 flex-col gap-2 md:flex-row md:items-center">
+            <label className="flex h-10 min-w-52 items-center gap-2 rounded border border-slate-700 bg-[#0f172a] px-3 text-sm text-slate-500">
+              <span>⌕</span>
+              <input className="w-full bg-transparent text-slate-200 outline-none placeholder:text-slate-500" placeholder="Search Ticker..." type="text" />
+            </label>
+            <div className="flex h-10 items-center gap-2 rounded border border-slate-700 bg-[#0f172a] px-3 text-sm font-bold text-slate-300">
+              <input
+                className="w-32 bg-transparent font-mono text-xs text-slate-200 outline-none [color-scheme:dark]"
+                type="date"
+                value={dateRange.start}
+                onChange={(event) => setDateRange((prev) => ({ ...prev, start: event.target.value }))}
+              />
+              <span className="text-slate-600">-</span>
+              <input
+                className="w-32 bg-transparent font-mono text-xs text-slate-200 outline-none [color-scheme:dark]"
+                type="date"
+                value={dateRange.end}
+                onChange={(event) => setDateRange((prev) => ({ ...prev, end: event.target.value }))}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-400">
+              <span>Exchange:</span>
+              {['ALL', 'TOSS', 'KIS', 'COINONE', 'BINANCE'].map((item) => (
+                <button
+                  key={item}
+                  className={`rounded px-3 py-2 text-xs font-bold transition ${
+                    selectedExchange === item
+                      ? 'bg-ai-cyan text-[#07111f]'
+                      : 'bg-slate-700/70 text-slate-200 hover:bg-slate-600'
+                  }`}
+                  type="button"
+                  onClick={() => setSelectedExchange(item)}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button className="h-10 rounded border border-slate-700 bg-[#0f172a] px-4 text-sm font-bold text-slate-200 hover:border-ai-cyan" type="button">
+            More Filters
+          </button>
+        </div>
+      </section>
+
+      <section className="bg-slate-surface border border-slate-700/80 rounded-lg overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1040px] border-collapse text-sm">
+            <thead className="border-b border-slate-700 bg-slate-800/70 text-xs text-slate-300">
+              <tr>
+                {['일시 (Date)', '거래소 (Exchange)', '종목명 (Asset/Ticker)', '구분 (Side)', '체결가 (Price)', '수량 (Qty)', '정산금액 (Total)', '상태 (Status)'].map((head) => (
+                  <th key={head} className="px-4 py-3 text-left font-bold">{head}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredTrades.map((trade) => (
+                <tr
+                  key={trade.id}
+                  className="cursor-pointer border-b border-slate-700/70 last:border-b-0 hover:bg-white/[0.04]"
+                  onClick={() => setSelectedTrade(trade)}
+                >
+                  <td className="px-4 py-4 font-mono text-xs text-slate-300">{trade.date.replaceAll('-', '.')} {trade.time}</td>
+                  <td className="px-4 py-4">
+                    <span className={`rounded border px-2 py-1 text-xs font-black ${exchangeTone[trade.exchange] || 'border-slate-600 bg-slate-700 text-slate-200'}`}>
+                      {trade.exchange}
+                    </span>
+                  </td>
+                  <td className="px-4 py-4">
+                    <p className="font-bold text-white">{trade.symbolName}</p>
+                    <p className="mt-1 text-xs text-slate-500 font-mono">{trade.ticker}</p>
+                  </td>
+                  <td className="px-4 py-4">
+                    <span className={`font-bold ${
+                      trade.side === '매수'
+                        ? 'text-emerald-300'
+                        : 'text-rose-300'
+                    }`}>
+                      {trade.side} {trade.side === '매수' ? '(Buy)' : '(Sell)'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-4 font-mono font-bold text-slate-100">{trade.price}</td>
+                  <td className="px-4 py-4 font-mono font-bold text-slate-100">{trade.quantity}</td>
+                  <td className="px-4 py-4 font-mono font-bold text-slate-100">{trade.amount}</td>
+                  <td className="px-4 py-4">
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${
+                      trade.status === '체결완료'
+                        ? 'bg-slate-600/60 text-slate-200'
+                        : 'border border-slate-600 bg-slate-700/30 text-slate-200'
+                    }`}>
+                      {trade.status}{trade.status === '미체결' ? ' (Pending)' : ''}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {filteredTrades.length === 0 && (
+                <tr>
+                  <td className="px-4 py-12 text-center text-sm text-slate-500" colSpan={8}>
+                    선택한 조건에 맞는 거래 내역이 없습니다.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {selectedTrade && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <button className="flex-1 bg-black/55 backdrop-blur-[1px]" type="button" aria-label="거래 상세 닫기" onClick={() => setSelectedTrade(null)} />
+          <aside className="h-full w-full max-w-md border-l border-slate-700 bg-[#0f172a] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-700 px-6 py-6">
+              <h2 className="text-lg font-extrabold text-white">거래 상세 내역</h2>
+              <button className="grid h-8 w-8 place-items-center rounded text-2xl text-slate-300 hover:bg-white/5 hover:text-white" type="button" aria-label="닫기" onClick={() => setSelectedTrade(null)}>
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-6 p-6">
+              <div className="rounded-lg border border-slate-700 bg-slate-800/70 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="grid h-11 w-11 place-items-center rounded-lg border border-slate-600 bg-[#0f172a] text-lg font-bold text-ai-cyan">
+                      {selectedTrade.symbolName.slice(0, 1)}
+                    </div>
+                    <div>
+                      <p className="text-lg font-extrabold text-white">{selectedTrade.symbolName}</p>
+                      <p className="mt-1 text-xs font-mono text-slate-400">{selectedTrade.ticker}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-bold text-white">지정가 {selectedTrade.side}</p>
+                    <span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-bold ${
+                      selectedTrade.status === '체결완료' ? 'bg-emerald-400/15 text-emerald-300' : 'bg-slate-700 text-slate-200'
+                    }`}>
+                      {selectedTrade.status}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <dl className="space-y-4 border-t border-slate-700 pt-5 text-sm">
+                {[
+                  ['체결 단가 (Execution Price)', selectedTrade.price],
+                  ['수량 (Quantity)', selectedTrade.quantity],
+                  ['주문 금액 (Total Amount)', selectedTrade.amount],
+                  ['적용 환율 (Exchange Rate)', selectedTrade.exchangeRate],
+                  ['수수료 (Fees)', selectedTrade.fees],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex items-center justify-between gap-4">
+                    <dt className="font-bold text-slate-400">{label}</dt>
+                    <dd className="font-mono font-bold text-slate-100">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+
+              <div className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-800/70 px-4 py-3">
+                <span className="font-extrabold text-white">총 정산 금액</span>
+                <span className="font-mono text-2xl font-extrabold text-emerald-300">{selectedTrade.amount}</span>
+              </div>
+
+              <dl className="space-y-2 border-t border-slate-800 pt-4 text-xs text-slate-500">
+                <div className="flex items-center justify-between">
+                  <dt>주문 일시</dt>
+                  <dd className="font-mono">{selectedTrade.date} {selectedTrade.time}</dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt>주문 번호</dt>
+                  <dd className="font-mono">{selectedTrade.orderNumber}</dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt>거래소</dt>
+                  <dd className="font-mono">{selectedTrade.exchange}</dd>
+                </div>
+              </dl>
+            </div>
+          </aside>
+        </div>
+      )}
+    </main>
+  )
+}
+
 export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userProfile }) {
   const [inputs, setInputs] = useState({
     appkey: '',
@@ -66,6 +578,8 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
     cano: '',
     env: 'MOCK'
   })
+  const [activeTab, setActiveTab] = useState('dashboard')
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   
   const [encrypted, setEncrypted] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -139,8 +653,8 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
   const getAllocationData = () => {
     if (!balance || !balance.holdings || balance.holdings.length === 0) {
       return [
-        { id: 'domestic', label: '국내 주식', value: 0, color: 'bg-primary' },
-        { id: 'overseas', label: '해외 주식', value: 0, color: 'bg-cyan' },
+        { id: 'domestic', label: '국내 주식', value: 0, color: 'bg-institutional-blue' },
+        { id: 'overseas', label: '해외 주식', value: 0, color: 'bg-ai-cyan' },
         { id: 'cash', label: '현금', value: 100, color: 'bg-slate-500' }
       ]
     }
@@ -148,8 +662,8 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
     const totalEval = balance.total_evaluation || 0
     if (totalEval === 0) {
       return [
-        { id: 'domestic', label: '국내 주식', value: 0, color: 'bg-primary' },
-        { id: 'overseas', label: '해외 주식', value: 0, color: 'bg-cyan' },
+        { id: 'domestic', label: '국내 주식', value: 0, color: 'bg-institutional-blue' },
+        { id: 'overseas', label: '해외 주식', value: 0, color: 'bg-ai-cyan' },
         { id: 'cash', label: '현금', value: 100, color: 'bg-slate-500' }
       ]
     }
@@ -174,7 +688,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
 
     return [
       { id: 'domestic', label: '국내 주식', value: domesticPercent, color: 'bg-blue-600' },
-      { id: 'overseas', label: '해외 주식', value: overseasPercent, color: 'bg-cyan' },
+      { id: 'overseas', label: '해외 주식', value: overseasPercent, color: 'bg-ai-cyan' },
       { id: 'cash', label: '현금', value: Math.max(0, cashPercent), color: 'bg-slate-500' }
     ]
   }
@@ -194,12 +708,23 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
   }
 
   return (
-    <div className="min-h-screen bg-obsidian-bg text-[#e2e2ec] font-inter px-6 py-8">
-      {/* 공통 통합 헤더 네비게이션 */}
-      <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} userProfile={userProfile} />
+    <div className="min-h-screen bg-obsidian-bg text-[#e2e2ec] font-inter">
+      <div className="flex min-h-screen flex-col lg:flex-row">
+        <SidebarNav
+          activeTab={activeTab}
+          isOpen={isSidebarOpen}
+          onClose={() => setIsSidebarOpen(false)}
+          onOpen={() => setIsSidebarOpen(true)}
+          onTabChange={setActiveTab}
+        />
 
-      {/* 메인 레이아웃 2단 그리드 */}
-      <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className={`min-w-0 flex-1 px-6 py-8 ${!isSidebarOpen ? 'pt-20 lg:pt-8' : ''}`}>
+          {/* 공통 통합 헤더 네비게이션 */}
+          <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} userProfile={userProfile} />
+
+          {/* 메인 레이아웃 2단 그리드 */}
+          {activeTab === 'dashboard' && (
+          <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* 좌측 패널 (lg:col-span-4) */}
         <section className="lg:col-span-4 flex flex-col gap-6">
@@ -482,6 +1007,13 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
           </div>
         </section>
       </main>
+          )}
+
+          {activeTab === 'watchlist' && <WatchlistTab />}
+          {activeTab === 'assets' && <AssetsTab balance={balance} allocation={allocation} />}
+          {activeTab === 'history' && <TradeHistoryTab />}
+        </div>
+      </div>
     </div>
   )
 }

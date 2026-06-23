@@ -8,3 +8,30 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '')
+
+export async function fetchNewsArticles({ market, query, limit, offset }) {
+  let q = supabase
+    .from('news_articles')
+    .select('*', { count: 'exact' })
+    .order('published_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  if (market && market !== 'ALL') {
+    q = q.eq('market', market)
+  }
+
+  if (query) {
+    q = q.or(
+      `title.ilike.%${query}%,summary.ilike.%${query}%,company_name.ilike.%${query}%,symbol.ilike.%${query}%`
+    )
+  }
+
+  const { data, count, error } = await q
+
+  if (error) throw error
+
+  return {
+      items: data,
+      totalCount: count || 0
+  }
+}

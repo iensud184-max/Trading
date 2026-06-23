@@ -28,25 +28,62 @@ export default function News({ isLoggedIn, userEmail, handleLogout }) {
   const [newsError, setNewsError] = useState('')
   const [expandedNews, setExpandedNews] = useState(null)
   const [lastFetchedAt, setLastFetchedAt] = useState('')
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+
+  const PAGE_SIZE = 10
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(totalCount / PAGE_SIZE))
+  }, [totalCount])
+
+  const pageNumbers = useMemo(() => {
+    const MAX_VISIBLE = 9
+    let start = Math.max(1, page - Math.floor(MAX_VISIBLE / 2))
+    let end = start + MAX_VISIBLE - 1
+
+    if (end > totalPages) {
+      end = totalPages
+      start = Math.max(1, end - MAX_VISIBLE + 1)
+    }
+
+    const numbers = []
+    for (let i = start; i <= end; i += 1) {
+      numbers.push(i)
+    }
+    return numbers
+  }, [page, totalPages])
 
   const loadNews = useCallback(async () => {
+    const callId = Math.random().toString(36).slice(2, 7)
     setNewsLoading(true)
     setNewsError('')
+
     try {
-      const items = await fetchNewsArticles({
+      const res = await fetchNewsArticles({
         market: newsMarket,
         query: newsQuery,
-        limit: 20,
-        offset: 0,
+        limit: PAGE_SIZE,
+        offset: (page - 1) * PAGE_SIZE,
       })
-      setNewsItems(items || [])
+
+      // response received
+
+      const items = res?.items || []
+      const total = res?.totalCount || 0
+
+      setNewsItems(items)
+      setTotalCount(total)
       setLastFetchedAt(items?.[0]?.fetched_at || '')
+
+      // state applied
+
     } catch (error) {
       setNewsError(error.message)
     } finally {
       setNewsLoading(false)
     }
-  }, [newsMarket, newsQuery])
+  }, [newsMarket, newsQuery, page])
 
   useEffect(() => {
     loadNews()
@@ -73,7 +110,10 @@ export default function News({ isLoggedIn, userEmail, handleLogout }) {
             <div className="flex flex-col sm:flex-row gap-3">
               <select
                 value={newsMarket}
-                onChange={(e) => setNewsMarket(e.target.value)}
+                onChange={(e) => {
+                  setNewsMarket(e.target.value)
+                  setPage(1)
+                }}
                 className="bg-[#0F172A] border border-slate-700 rounded px-3 py-2 text-sm text-white"
               >
                 {marketOptions.map((option) => (
@@ -82,23 +122,23 @@ export default function News({ isLoggedIn, userEmail, handleLogout }) {
                   </option>
                 ))}
               </select>
+
               <input
                 type="text"
                 value={newsQuery}
-                onChange={(e) => setNewsQuery(e.target.value)}
+                onChange={(e) => {
+                  setNewsQuery(e.target.value)
+                  setPage(1)
+                }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') loadNews()
+                  if (e.key === 'Enter') {
+                    setPage(1)
+                    loadNews()
+                  }
                 }}
                 placeholder="종목명 또는 티커 검색"
                 className="min-w-[240px] bg-[#0F172A] border border-slate-700 rounded px-3 py-2 text-sm text-white"
               />
-              <button
-                onClick={loadNews}
-                disabled={newsLoading}
-                className="bg-ai-cyan text-black font-semibold rounded px-4 py-2 text-sm disabled:opacity-60"
-              >
-                {newsLoading ? 'LOADING...' : '새로고침'}
-              </button>
             </div>
           </div>
 
@@ -118,6 +158,8 @@ export default function News({ isLoggedIn, userEmail, handleLogout }) {
           </div>
 
           <div className="mb-4 text-xs text-slate-500">Last synced: {lastFetchedAt ? formatDate(lastFetchedAt) : 'unknown'}</div>
+
+          {/* 디버깅 블록 제거됨 */}
 
           {newsError ? (
             <div className="p-4 rounded border border-red-800 bg-red-950/30 text-red-300 text-sm">{newsError}</div>
@@ -189,6 +231,53 @@ export default function News({ isLoggedIn, userEmail, handleLogout }) {
               )
             })}
           </div>
+
+          <div className="flex justify-center items-center gap-1.5 mt-8 flex-wrap">
+            <button
+              disabled={page === 1}
+              onClick={() => setPage(1)}
+              className="px-2.5 py-1.5 text-xs rounded border border-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed hover:border-slate-500"
+            >
+              처음
+            </button>
+            <button
+              disabled={page === 1}
+              onClick={() => setPage((prev) => prev - 1)}
+              className="px-2.5 py-1.5 text-xs rounded border border-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed hover:border-slate-500"
+            >
+              이전
+            </button>
+
+            {pageNumbers.map((num) => (
+              <button
+                key={num}
+                onClick={() => setPage(num)}
+                className={
+                  num === page
+                    ? 'px-3 py-1.5 text-xs rounded bg-ai-cyan text-black font-semibold'
+                    : 'px-3 py-1.5 text-xs rounded border border-slate-700 text-slate-300 hover:border-ai-cyan/50'
+                }
+              >
+                {num}
+              </button>
+            ))}
+
+            <button
+              disabled={page >= totalPages}
+              onClick={() => setPage((prev) => prev + 1)}
+              className="px-2.5 py-1.5 text-xs rounded border border-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed hover:border-slate-500"
+            >
+              다음
+            </button>
+            <button
+              disabled={page >= totalPages}
+              onClick={() => setPage(totalPages)}
+              className="px-2.5 py-1.5 text-xs rounded border border-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed hover:border-slate-500"
+            >
+              마지막
+            </button>
+          </div>
+
         </section>
       </main>
     </div>

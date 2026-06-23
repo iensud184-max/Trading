@@ -18,7 +18,7 @@ class NewsRepository:
         self,
         market: str = "ALL",
         query: str = "",
-        limit: int = 20,
+        limit: int = 10,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         if not self.supabase_url or not self.supabase_anon_key:
@@ -52,6 +52,40 @@ class NewsRepository:
         )
         response.raise_for_status()
         return response.json()
+    
+    def count_articles(self, market: str = "ALL", query: str = "") -> int:
+        if not self.supabase_url or not self.supabase_anon_key:
+            return 0
+
+        params: dict[str, str] = {
+            "select": "id",
+            "is_active": "eq.true",
+            "count": "exact",
+        }
+
+        if market and market.upper() != "ALL":
+            params["market"] = f"eq.{market.upper()}"
+
+        if query:
+            q = query.strip()
+            or_clauses = [
+                f"title.ilike.%{q}%",
+                f"summary.ilike.%{q}%",
+                f"company_name.ilike.%{q}%",
+                f"symbol.ilike.%{q}%",
+            ]
+            params["or"] = f"({','.join(or_clauses)})"
+
+        response = requests.get(
+            f"{self.supabase_url}/rest/v1/news_articles",
+            headers=self._read_headers(),
+            params=params,
+            timeout=15,
+        )
+        response.raise_for_status()
+
+        # Supabase count는 headers에 있음
+        return int(response.headers.get("Content-Range", "0").split("/")[-1])
 
     def upsert_articles(self, articles: list[dict[str, Any]]) -> None:
         if not self.is_configured or not articles:
@@ -81,6 +115,7 @@ class NewsRepository:
             "apikey": self.supabase_anon_key,
             "Authorization": f"Bearer {self.supabase_anon_key}",
             "Content-Type": "application/json",
+            "Prefer": "count=exact"
         }
 
     def _write_headers(self) -> dict[str, str]:

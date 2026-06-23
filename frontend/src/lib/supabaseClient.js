@@ -34,14 +34,33 @@ export async function fetchNewsArticles({ market = 'ALL', query = '', limit = 20
     )
   }
 
+  const headers = {
+    ...buildHeaders(),
+    Prefer: 'count=exact',
+  }
+
   const response = await fetch(`${SUPABASE_URL}/rest/v1/news_articles?${params.toString()}`, {
-    headers: buildHeaders(),
+    headers,
   })
 
   if (!response.ok) {
     throw new Error(`Supabase news query failed: ${response.status} ${response.statusText}`)
   }
 
-  return response.json()
+  const data = await response.json()
+  const contentRange = response.headers.get('content-range')
+  let count = 0
+
+  if (contentRange) {
+    const [, total] = contentRange.split('/')
+    count = Number(total) || data.length
+  } else {
+    count = data.length
+  }
+
+  return {
+    items: Array.isArray(data) ? data : [],
+    totalCount: count,
+  }
 }
 

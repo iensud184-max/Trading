@@ -147,7 +147,7 @@ def get_news_feed():
     """
     market = request.args.get("market", "ALL")
     query = request.args.get("query", "")
-    limit = request.args.get("limit", 20)
+    limit = request.args.get("limit", 10)
     offset = request.args.get("offset", 0)
     try:
         items = news_repository.list_articles(
@@ -156,14 +156,21 @@ def get_news_feed():
             limit=int(limit),
             offset=int(offset),
         )
+
+        total_count = news_repository.count_articles(
+            market=market,
+            query=query,
+        )
+
         return jsonify({
             "success": True,
             "data": {
                 "items": items,
-                "count": len(items),
+                "totalCount": total_count,
+                "limit": int(limit),
+                "offset": int(offset),
                 "market": market.upper(),
                 "query": query,
-                "offset": int(offset),
             }
         })
     except requests.exceptions.HTTPError as e:

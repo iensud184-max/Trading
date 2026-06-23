@@ -25,7 +25,7 @@ class NewsIngestService:
 
         try:
             if self.naver_client_id and self.naver_client_secret:
-                for query in ["코스피", "증시", "환율", "금리"]:
+                for query in ["코스피", "코스닥", "증시", "환율", "금리"]:
                     articles = self._fetch_naver(query)
                     batches.extend(articles)
 

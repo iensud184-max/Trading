@@ -1,0 +1,54 @@
+[
+  {
+    "asset_type": "STOCK",
+    "model_version": "lgbm_stock_signal_v7",
+    "created_at": "2026-06-24T08:52:52.764120+00:00",
+    "updated_at": "2026-06-24T08:53:25.384062+00:00",
+    "model_path": "/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/ml/models/lgbm_stock_signal_v7.joblib",
+    "metrics_path": "/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/ml/models/lgbm_stock_signal_v7.metrics.json",
+    "summary_path": "/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/ml/data/processed/stock_v7_summary.json",
+    "recommendation_reason": "file-based score comparison",
+    "is_latest": true,
+    "is_recommended": false,
+    "is_serving": true,
+    "approved_by": "d4efb544-2a8a-443d-994d-9e7077eddbe7",
+    "approved_at": "2026-06-24T08:53:25.384074+00:00"
+  },
+  {
+    "asset_type": "CRYPTO",
+    "model_version": "lgbm_crypto_signal_v7",
+    "created_at": "2026-06-24T08:53:17.468451+00:00",
+    "updated_at": "2026-06-24T16:26:57.802604+00:00",
+    "model_path": "/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/ml/models/lgbm_crypto_signal_v7.joblib",
+    "metrics_path": "/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/ml/models/lgbm_crypto_signal_v7.metrics.json",
+    "summary_path": "/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/ml/data/processed/crypto_v7_summary.json",
+    "recommendation_reason": "file-based score comparison",
+    "is_latest": true,
+    "is_recommended": true,
+    "is_serving": false,
+    "approved_by": "d4efb544-2a8a-443d-994d-9e7077eddbe7",
+    "approved_at": "2026-06-24T08:53:30.146705+00:00"
+  },
+  {
+    "asset_type": "STOCK",
+    "model_version": "lgbm_stock_signal_v6",
+    "created_at": "2026-06-24T08:53:43.197886+00:00",
+    "updated_at": "2026-06-24T08:53:43.197888+00:00",
+    "is_latest": false,
+    "is_recommended": false,
+    "is_serving": false,
+    "approved_by": "d4efb544-2a8a-443d-994d-9e7077eddbe7",
+    "approved_at": "2026-06-24T08:53:43.197808+00:00"
+  },
+  {
+    "asset_type": "CRYPTO",
+    "model_version": "lgbm_crypto_signal_v6",
+    "created_at": "2026-06-24T08:53:45.367675+00:00",
+    "updated_at": "2026-06-24T08:53:45.367684+00:00",
+    "is_latest": false,
+    "is_recommended": false,
+    "is_serving": false,
+    "approved_by": "d4efb544-2a8a-443d-994d-9e7077eddbe7",
+    "approved_at": "2026-06-24T08:53:45.367473+00:00"
+  }
+]

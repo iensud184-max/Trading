@@ -59,8 +59,25 @@ def build_daily_backtest(
         if selected.empty:
             continue
 
-        top_avg_return = float(selected["future_return"].mean())
-        net_top_avg_return = top_avg_return - cost_rate
+        actual_returns = []
+        is_positives = []
+        net_returns = []
+        for idx, row in selected.iterrows():
+            pos = row.get("position", "LONG")
+            ret = row["future_return"]
+            actual_ret = -ret if pos == "SHORT" else ret
+            net_ret = actual_ret - cost_rate
+            actual_returns.append(actual_ret)
+            net_returns.append(net_ret)
+            is_pos = 1 if actual_ret > 0 else 0
+            is_positives.append(is_pos)
+
+        selected["actual_future_return"] = actual_returns
+        selected["future_return_net"] = net_returns
+        selected["is_positive"] = is_positives
+
+        top_avg_return = float(selected["actual_future_return"].mean())
+        net_top_avg_return = float(selected["future_return_net"].mean())
         universe_avg_return = float(ranked["future_return"].mean())
         net_universe_avg_return = universe_avg_return - cost_rate
         excess_return = top_avg_return - universe_avg_return
@@ -80,23 +97,25 @@ def build_daily_backtest(
                 "avg_signal_score": float(selected["signal_score"].mean()),
                 "avg_up_probability": float(selected["up_probability"].mean()),
                 "avg_risk_probability": float(selected["risk_probability"].mean()),
-                "precision_at_top_n": float((selected["future_return"] > 0).mean()),
+                "precision_at_top_n": float(selected["is_positive"].mean()),
             }
         )
 
+        selection_cols = [
+            "symbol",
+            "future_return",
+            "up_probability",
+            "risk_probability",
+            "signal_score",
+        ]
+        if "position" in selected.columns:
+            selection_cols.append("position")
+
         selection_rows.append(
-            selected[
-                [
-                    "symbol",
-                    "future_return",
-                    "up_probability",
-                    "risk_probability",
-                    "signal_score",
-                ]
-            ].assign(
+            selected[selection_cols].assign(
                 date=date,
-                future_return_net=selected["future_return"] - cost_rate,
-                is_positive=(selected["future_return"] > 0).astype(int),
+                future_return_net=selected["future_return_net"],
+                is_positive=selected["is_positive"],
             )
         )
 
@@ -217,6 +236,10 @@ def main() -> None:
     valid_df["risk_model_version"] = ""
     valid_df["signal_score"] = valid_df["up_probability"] * 100
 
+    asset_type = config["model"].get("asset_type", "STOCK").upper()
+    long_threshold = float(config.get("prediction", {}).get("long_threshold", 0.30))
+    short_threshold = float(config.get("prediction", {}).get("short_threshold", 0.70))
+
     if args.strategy == "composite":
         if not risk_model_path:
             raise ValueError("복합 백테스트에는 risk 모델 경로가 필요합니다.")
@@ -230,8 +253,36 @@ def main() -> None:
             risk_calibrator,
         )
         valid_df["risk_model_version"] = risk_payload["config"]["model"]["version"]
-        valid_df["signal_score"] = (valid_df["up_probability"] - valid_df["risk_probability"]) * 100
+        
+        positions = []
+        scores = []
+        for idx, row in valid_df.iterrows():
+            up_p = row["up_probability"]
+            risk_p = row["risk_probability"]
+            if asset_type == "CRYPTO":
+                if risk_p < long_threshold:
+                    positions.append("LONG")
+                    scores.append(up_p * 100)
+                elif risk_p > short_threshold:
+                    positions.append("SHORT")
+                    scores.append(risk_p * 100)
+                else:
+                    positions.append("HOLD")
+                    scores.append(0.0)
+            else:
+                if risk_p < long_threshold:
+                    positions.append("LONG")
+                    scores.append(up_p * 100)
+                else:
+                    positions.append("HOLD")
+                    scores.append(0.0)
+        valid_df["position"] = positions
+        valid_df["signal_score"] = scores
         valid_df["scoring_strategy"] = "composite"
+    else:
+        valid_df["position"] = "LONG"
+        valid_df["signal_score"] = valid_df["up_probability"] * 100
+        valid_df["scoring_strategy"] = "up_only"
 
     summary_output, daily_output = resolve_output_paths(config, args.strategy)
     if not summary_output.is_absolute():

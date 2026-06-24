@@ -32,7 +32,11 @@ teamproject/
 │   │   ├── lgbm_stock_v6.yaml         # 주식 고도화 실험 설정
 │   │   ├── lgbm_stock_risk_v6.yaml    # 주식 하락 위험 고도화 설정
 │   │   ├── lgbm_crypto_v6.yaml        # 코인 고도화 실험 설정
-│   │   └── lgbm_crypto_risk_v6.yaml   # 코인 하락 위험 고도화 설정
+│   │   ├── lgbm_crypto_risk_v6.yaml   # 코인 하락 위험 고도화 설정
+│   │   ├── lgbm_stock_v7.yaml         # [NEW] 주식 Stochastic, OBV 피처 v7 설정
+│   │   ├── lgbm_stock_risk_v7.yaml    # [NEW] 주식 하락 위험 v7 설정
+│   │   ├── lgbm_crypto_v7.yaml        # [NEW] 코인 Stochastic, OBV 피처 v7 설정
+│   │   └── lgbm_crypto_risk_v7.yaml   # [NEW] 코인 하락 위험 v7 설정
 │   ├── data/
 │   │   ├── raw/                  # 원천 캔들 CSV 보관
 │   │   │   ├── *.template.csv    # 뉴스/코인 외부/주식 이벤트 피처 템플릿 예시
@@ -49,39 +53,48 @@ teamproject/
 │       ├── evaluate.py           # 검증 지표 출력
 │       ├── predict.py            # 저장 모델 기반 최신 데이터 예측
 │       ├── backtest_signals.py   # 상위 signal_score 후보 기준 백테스트
+│       ├── tune_hyperparameters.py# [NEW] Optuna 기반 하이퍼파라미터 최적화(HPO) 도구
 │       ├── run_pipeline_bundle.py# 동일 조건 재현용 일괄 실행기
 │       ├── compare_experiments.py# summary JSON 기준 버전별 성능 비교 스크립트
 │       ├── write_experiment_report.py # summary JSON 기반 Markdown 리포트 생성기
 │       └── model_utils.py        # 시계열 분할/가중치/평가 공용 유틸
 ├── backend/                      # Flask 백엔드 (API Gateway & 자동매매 엔진)
-│   ├── app.py                    # Flask 서버 진입점 (현재 구현됨, model-results/registry/active-model/jobs/full-run/readiness API 포함)
+│   ├── app.py                    # Flask 서버 진입점 (CORS, 전역 인스턴스 바인딩, Blueprint 라우트 등록 및 스케줄러 기동)
 │   ├── requirements.txt          # 파이썬 의존성 패키지 목록 (현재 구현됨)
-│   ├── config.py                 # 환경 변수 및 공통 설정 로더 (추가 예정)
 │   ├── scripts/
 │   │   └── export_training_candles.py # 학습용 주식/코인 캔들 CSV 수집 스크립트 (preset/chunk/failure-output 지원)
+│   ├── routes/                   # Blueprint 기반 API 라우트 레이어 (리팩토링 완료)
+│   │   ├── __init__.py           # routes 패키지 초기화 파일
+│   │   ├── home.py               # 대시보드, 홈/시장 현황, 잔고 조회 라우트 Blueprint
+│   │   ├── keys.py               # API 키 등록, 저장, 조회, 테스트 라우트 Blueprint
+│   │   ├── ml.py                 # ML 데이터셋 추출, 작업 상태, 학습/튜닝, 활성 모델, 리포트 라우트 Blueprint
+│   │   └── news.py               # 뉴스 피드 조회, 실시간 동기화, AI 요약 보장 라우트 Blueprint
 │   ├── services/                 # 비즈니스 로직 서비스 레이어
-│   │   ├── __init__.py           # 패키지 초기화 파일 (추가 예정)
 │   │   ├── exchange_client.py    # 거래소/브로커 추상화 부모 클래스 (현재 구현됨)
 │   │   ├── toss_client.py        # Toss Open API 메인 주식 클라이언트 (현재 구현됨)
 │   │   ├── kis_client.py         # 한국투자증권 레거시/보류 주식 클라이언트 (현재 구현됨)
-│   │   ├── coinone_client.py     # 코인원 가상자산 메인 클라이언트 (현재 구현됨)
+│   │   ├── coinone_client.py     # 코인원 가상자산 메인 클라이언트 (현재 구현됨 - HMAC-SHA512 API)
 │   │   ├── binance_client.py     # 바이낸스 가상자산 확장 클라이언트 (현재 구현됨)
 │   │   ├── upbit_client.py       # 업비트 가상자산 클라이언트 (레거시/비활성화됨)
 │   │   ├── news_repository.py    # 뉴스 데이터 조회/저장 서비스 (현재 구현됨)
 │   │   ├── news_summary_service.py # 뉴스 GPT 요약 생성 서비스
 │   │   ├── news_query_planner.py # 뉴스 수집 쿼리 예산/쿨다운/우선순위 플래너
 │   │   ├── news_ingest.py        # 뉴스 수집 서비스 (현재 구현됨)
-│   │   ├── ml_job_service.py     # ML 작업 이력 저장 및 파이프라인 실행 서비스 (현재 구현됨)
-│   │   ├── ml_automation_service.py # 자동 수집+학습 preset 정의 서비스 (현재 구현됨)
-│   │   ├── ml_registry_service.py # 파일 기반 모델 레지스트리 상태 저장 서비스 (현재 구현됨)
+│   │   ├── ml_job_service.py     # ML 작업(수집, HPO, 학습) 생명주기 관리 서비스 (현재 구현됨)
+│   │   ├── ml_automation_service.py # 자동화 수집+학습 preset 정의 및 스케줄러 연동 서비스 (현재 구현됨)
+│   │   ├── ml_registry_service.py # 파일 및 DB 통합 모델 레지스트리 상태 저장 서비스 (현재 구현됨)
 │   │   ├── symbol_metadata.py    # 모델 결과 표시용 심볼명/시장/섹터 메타데이터 매핑 (현재 구현됨)
+│   │   ├── auth_service.py       # Authorization JWT 토큰 디코딩 및 user_id 파싱 서비스 (신설됨)
+│   │   ├── supabase_client.py    # Supabase REST API 통신 및 데이터 동기화 서비스 (신설됨)
+│   │   ├── home_service.py       # 대시보드 종합 데이터 빌드 및 코인원/KIS 정보 헬퍼 서비스 (신설됨)
+│   │   ├── keys_service.py       # API 호출 에러 분류 (FATAL / TEMPORARY) 서비스 (신설됨)
+│   │   ├── ml_model_service.py   # ML 모델 지표 스캔, 추천, 준비 상태 빌드 및 보고서 기동 서비스 (신설됨)
+│   │   ├── ml_scheduler.py       # 백그라운드 뉴스 수집 및 ML 자동화 스케줄러 서비스 (신설됨)
 │   │   ├── agent.py              # LLM & LangChain 챗봇 오케스트레이터 (추가 예정)
 │   │   └── trading_engine.py     # 백그라운드 조건 감시 엔진 (추가 예정)
-│   ├── utils/                    # 공통 유틸리티 함수
-│   │   ├── __init__.py           # 패키지 초기화 파일 (추가 예정)
-│   │   ├── crypto_helper.py      # API Key AES-256 양방향 암호화 (현재 구현됨)
-│   │   └── logger.py             # 자동매매 이력 로깅 헬퍼 (추가 예정)
-│   └── tests/                    # API 및 엔진 단위 테스트 코드 (추가 예정)
+│   └── utils/                    # 공통 유틸리티 함수
+│       ├── crypto_helper.py      # API Key AES-256 양방향 암호화 (현재 구현됨)
+│       └── file_helpers.py       # JSON/CSV 파일 입출력 및 모델 아티팩트 파싱 유틸리티 (신설됨)
 └── frontend/                     # React 프론트엔드 (Vite + Tailwind CSS v4)
     ├── package.json              # 노드 의존성 및 스크립트 정의
     ├── package-lock.json         # 노드 의존성 잠금 파일
@@ -99,11 +112,12 @@ teamproject/
         ├── pages/                # 라우트 단위 페이지 컴포넌트
         │   ├── Dashboard.jsx     # 메인 대시보드 화면
         │   ├── News.jsx          # 뉴스 화면
-        │   ├── AdminMlData.jsx   # 학습 데이터 수집 + 학습 실행 + 작업 이력 + 모델 버전별 성능 비교 + 레지스트리/서비스 반영 관리자 화면
+        │   ├── AdminMlData.jsx   # [UPDATE] HPO 튜닝 패널 및 JobLogModal 상세 로그 뷰어 통합 관리자 화면
         │   ├── Login.jsx         # 로그인 페이지
-        │   └── Signup.jsx        # 이메일 회원가입 페이지
+        │   └── Settings.jsx      # 사용자 계정 및 투자성향 재분석 설정 페이지
         ├── components/           # 재사용 가능한 UI 컴포넌트
-        │   └── Header.jsx        # 상단 공통 헤더
+        │   ├── Header.jsx        # 상단 공통 헤더
+        │   └── InvestmentSurveyModal.jsx # [NEW] 공통 투자 성향 진단 설문 통합 모달 컴포넌트
         ├── hooks/                # 커스텀 훅 (추가 예정)
         └── context/              # AuthContext 등 전역 컨텍스트 (추가 예정)
 ```
@@ -130,8 +144,10 @@ teamproject/
 
 ### 2.2 백엔드 (`backend/`)
 
-* **`app.py` (API Gateway)**:
-  * 프론트엔드와 챗봇의 모든 요청을 받아들이는 통로 역할을 수행하며, 세부 비즈니스 로직은 `services/`로 위임합니다.
+* **`app.py` (API Gateway Entrypoint)**:
+  * Flask 어플리케이션의 핵심 초기화 및 CORS 구성, 환경 변수 바인딩을 수행합니다.
+  * 기존의 모놀리식 API 라우트들은 `backend/routes/` 하위의 Blueprint 모듈들(`home.py`, `keys.py`, `ml.py`, `news.py`)로 완전히 분리되었으며, 백그라운드 스케줄러 기동 로직은 `backend/services/ml_scheduler.py`로 위임되었습니다.
+  * 세부 비즈니스 로직 역시 각각의 목적에 맞춘 `backend/services/` 하위 모듈들로 이관되어 동작합니다.
   * **학습 데이터 수집 API (`POST /api/ml/export-candles`)**:
     * 관리자 페이지(`/admin/ml-data`)에서 호출하는 학습용 CSV 생성 엔드포인트입니다.
     * 주식은 Toss Open API, 코인은 Binance 공개 캔들 API를 사용합니다.
@@ -186,7 +202,6 @@ teamproject/
   * 테이블 생성, RLS(Row Level Security) 설정, Postgres 트리거 및 펑션 정의는 수동으로 원격 DB에 쿼리를 치는 것이 아니라, 버전 번호가 매겨진 `.sql` 마이그레이션 파일로 누적하여 형상 관리합니다.
 * **Toss/가상자산 전환 시 DB 변경 대상**:
   * `exchange` CHECK 제약에 `TOSS`, `COINONE`, `BINANCE`를 추가해야 합니다.
-
   * `user_api_keys`에는 Toss `accountSeq` 저장 필드가 필요합니다.
   * `trade_proposals`에는 Toss `clientOrderId`, `orderId`, `marketCountry`, `currency`, `timeInForce`, `orderAmount` 매핑 필드가 필요합니다.
   * 실제 DB 변경은 문서 갱신 이후 별도 마이그레이션으로 수행합니다.
@@ -247,7 +262,7 @@ teamproject/
 
 ## 4. 디렉토리 표준화에 따른 개발 이점
 
-1. **역할의 명확성**: 파일명만 봐도 해당 코드가 프론트엔드 화면, 백엔드 API Gateway, Toss 통신 로직, DB 마이그레이션 중 어느 영역인지 즉시 식별할 수 있습니다.
+1. **역할의 명확성**: 파일명만 봐도 해당 코드가 프론트엔드 화면, 백엔드 API Gateway, Toss 통신 로직, DB 마이그레이션 중 영역인지 즉시 식별할 수 있습니다.
 2. **Toss 전환 안정성**: KIS 레거시 구현을 보존하면서 신규 Toss 클라이언트를 별도 모듈로 추가하므로, 기존 기능을 훼손하지 않고 점진적으로 전환할 수 있습니다.
 3. **ML 실험 격리**: `ml/` 디렉토리에서 주식/코인 모델의 학습 데이터, 피처 생성, 모델 학습을 격리하므로 Flask 서비스 코드와 실험 코드가 섞이지 않습니다.
 4. **협업 병목 제거**: 프론트엔드 개발자는 `frontend/` 내부 UI와 Supabase Realtime 구독에 집중하고, 백엔드 개발자는 `backend/` 내부에서 Toss API 스펙과 보안 정책에 맞춰 작업할 수 있습니다.

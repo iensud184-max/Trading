@@ -72,6 +72,23 @@ const trainingPresets = [
   },
 ]
 
+const tuningPresets = [
+  {
+    key: 'stock-v7-tune',
+    label: '주식 v7 HPO 튜닝',
+    config: 'ml/configs/lgbm_stock_v7.yaml',
+    defaultTrials: 20,
+    summary: '주식 v7 모델에 대해 Optuna로 최적의 하이퍼파라미터(learning_rate, num_leaves 등)를 탐색합니다.',
+  },
+  {
+    key: 'crypto-v7-tune',
+    label: '코인 v7 HPO 튜닝',
+    config: 'ml/configs/lgbm_crypto_v7.yaml',
+    defaultTrials: 20,
+    summary: '코인 v7 모델에 대해 Optuna로 최적의 하이퍼파라미터를 탐색합니다.',
+  },
+]
+
 const automationPresets = [
   {
     key: 'stock-v7-full',
@@ -147,6 +164,86 @@ function StatusPanel({ result, error, loading }) {
   )
 }
 
+function JobLogModal({ job, onClose }) {
+  if (!job) return null
+
+  const handleCopy = () => {
+    const text = `=== Job Log: ${job.label || job.id} ===\n\n[STDOUT]\n${job.stdout || 'No stdout'}\n\n[STDERR]\n${job.stderr || 'No stderr'}`
+    navigator.clipboard.writeText(text)
+    alert('로그가 클립보드에 복사되었습니다.')
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="relative w-full max-w-4xl max-h-[85vh] flex flex-col rounded-lg border border-slate-700 bg-[#0f172a] text-[#e2e2ec] shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+          <div className="flex items-center gap-2">
+            <span className="rounded border border-ai-cyan/40 px-2 py-0.5 text-[10px] font-bold text-ai-cyan">
+              {String(job.type || 'job').toUpperCase()}
+            </span>
+            <span className="text-sm font-bold text-white">
+              {job.label || job.id} 작업 상세 로그
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-slate-400 hover:text-white text-xl font-bold transition-colors"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4 font-mono text-xs leading-5">
+          {job.config || job.interval ? (
+            <div className="rounded bg-black/30 p-3 border border-slate-800/60 text-slate-400">
+              <p>설정: {job.config || '-'}</p>
+              <p>인터벌: {job.interval || '-'}</p>
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex flex-col rounded border border-slate-800 bg-black/40">
+              <div className="flex items-center justify-between border-b border-slate-800 px-3 py-1.5 bg-black/20">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">STDOUT (출력)</span>
+              </div>
+              <pre className="h-[40vh] overflow-auto p-3 whitespace-pre-wrap text-emerald-200 text-[11px] leading-relaxed">
+                {job.stdout || '출력 로그가 없습니다.'}
+              </pre>
+            </div>
+
+            <div className="flex flex-col rounded border border-slate-800 bg-black/40">
+              <div className="flex items-center justify-between border-b border-slate-800 px-3 py-1.5 bg-black/20">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400">STDERR (에러)</span>
+              </div>
+              <pre className="h-[40vh] overflow-auto p-3 whitespace-pre-wrap text-rose-300 text-[11px] leading-relaxed">
+                {job.stderr || '에러 로그가 없습니다.'}
+              </pre>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-slate-800 px-5 py-3.5 bg-black/10">
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="rounded border border-ai-cyan/40 px-4 py-2 text-xs font-bold text-ai-cyan transition hover:bg-ai-cyan/10"
+          >
+            전체 복사
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-bold text-white transition hover:bg-slate-700"
+          >
+            닫기
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function formatMetric(value) {
   if (value === null || value === undefined || value === '') return '-'
   const numberValue = Number(value)
@@ -169,7 +266,13 @@ function formatReturnPercent(value) {
 }
 
 function formatVersionBacktest(version, key) {
-  return formatReturnPercent(version?.backtests?.composite?.data?.[key])
+  const compositeData = version?.backtests?.composite?.data;
+  if (!compositeData) return '-';
+  let val = compositeData[key];
+  if ((val === undefined || val === null) && typeof key === 'string' && key.endsWith('_net')) {
+    val = compositeData[key.replace('_net', '')];
+  }
+  return formatReturnPercent(val);
 }
 
 function formatSignedDelta(value, formatter = 'metric') {
@@ -253,7 +356,24 @@ function VersionDeltaPanel({ activeVersion, baselines = [] }) {
   )
 }
 
-function JobHistoryPanel({ jobs = [], loading, error }) {
+function formatTime(isoString) {
+  if (!isoString) return '-'
+  try {
+    const date = new Date(isoString)
+    if (Number.isNaN(date.getTime())) return isoString
+    const pad = (n) => String(n).padStart(2, '0')
+    const month = pad(date.getMonth() + 1)
+    const day = pad(date.getDate())
+    const hour = pad(date.getHours())
+    const minute = pad(date.getMinutes())
+    const second = pad(date.getSeconds())
+    return `${month}-${day} ${hour}:${minute}:${second}`
+  } catch (e) {
+    return isoString
+  }
+}
+
+function JobHistoryPanel({ jobs = [], loading, error, onShowLog }) {
   if (loading) {
     return (
       <div className="rounded-lg border border-slate-800 bg-[#0f172a] p-4 text-sm text-slate-400">
@@ -289,35 +409,53 @@ function JobHistoryPanel({ jobs = [], loading, error }) {
             <th className="px-3 py-2">설정</th>
             <th className="px-3 py-2">시작</th>
             <th className="px-3 py-2">종료</th>
+            <th className="px-3 py-2 text-right">로그</th>
           </tr>
         </thead>
         <tbody>
           {jobs.map((job) => (
-            <tr key={job.id} className="border-t border-slate-800 align-top">
+            <tr key={job.id} className="border-t border-slate-800 align-top transition hover:bg-white/5">
               <td className="px-3 py-2">
-                <p className="font-semibold text-white">{job.label || job.exchange || job.id}</p>
-                {job.output ? <p className="mt-1 break-all font-mono text-[10px] text-slate-500">{job.output}</p> : null}
+                <p className="font-semibold text-white truncate max-w-[150px]" title={job.label || job.exchange || job.id}>
+                  {job.label || job.exchange || job.id}
+                </p>
+                {job.output ? (
+                  <p className="mt-1 truncate font-mono text-[10px] text-slate-500 max-w-[150px]" title={job.output}>
+                    {job.output}
+                  </p>
+                ) : null}
                 {job.failure_count ? (
                   <p className="mt-1 text-[10px] text-amber-300">실패 심볼 {job.failure_count}건</p>
                 ) : null}
               </td>
-              <td className="px-3 py-2">{job.type}</td>
+              <td className="px-3 py-2 font-mono text-[10px] text-slate-400">{job.type}</td>
               <td className="px-3 py-2">
-                <span className={`rounded border px-2 py-1 text-[10px] font-bold ${
+                <span className={`rounded border px-2 py-0.5 text-[9px] font-bold ${
                   job.status === 'success'
-                    ? 'border-emerald-500/40 text-emerald-300'
+                    ? 'border-emerald-500/40 text-emerald-300 bg-emerald-950/20'
                     : job.status === 'failed'
-                      ? 'border-red-500/40 text-red-300'
-                      : 'border-ai-cyan/40 text-ai-cyan'
+                      ? 'border-red-500/40 text-red-300 bg-red-950/20'
+                      : 'border-ai-cyan/40 text-ai-cyan bg-ai-cyan/5'
                 }`}>
-                  {job.status}
+                  {String(job.status || 'running').toUpperCase()}
                 </span>
               </td>
               <td className="px-3 py-2">
-                <p className="break-all font-mono text-[10px] text-slate-400">{job.config || job.interval || '-'}</p>
+                <p className="truncate font-mono text-[10px] text-slate-400 max-w-[150px]" title={job.config || job.interval || '-'}>
+                  {job.config || job.interval || '-'}
+                </p>
               </td>
-              <td className="px-3 py-2 break-words font-mono text-[10px] text-slate-400">{job.started_at || '-'}</td>
-              <td className="px-3 py-2 break-words font-mono text-[10px] text-slate-400">{job.finished_at || '-'}</td>
+              <td className="px-3 py-2 font-mono text-[10px] text-slate-400 whitespace-nowrap">{formatTime(job.started_at)}</td>
+              <td className="px-3 py-2 font-mono text-[10px] text-slate-400 whitespace-nowrap">{formatTime(job.finished_at)}</td>
+              <td className="px-3 py-2 text-right">
+                <button
+                  type="button"
+                  onClick={() => onShowLog?.(job)}
+                  className="rounded border border-slate-700 bg-slate-800/40 px-2 py-1 text-[10px] font-bold text-slate-300 transition hover:border-ai-cyan hover:text-white"
+                >
+                  로그 보기
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -371,16 +509,16 @@ function RegistryPanel({ title, rows = [], loading, error, onActivate, activatin
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-1">
                       {row.is_latest ? (
-                        <span className="rounded border border-slate-600 px-2 py-1 text-[10px] font-bold text-slate-300">LATEST</span>
+                        <span className="rounded border border-slate-600 px-2 py-1 text-[10px] font-bold text-slate-300">최신</span>
                       ) : null}
                       {row.is_recommended ? (
-                        <span className="rounded border border-emerald-500/40 px-2 py-1 text-[10px] font-bold text-emerald-300">PICK</span>
+                        <span className="rounded border border-emerald-500/40 px-2 py-1 text-[10px] font-bold text-emerald-300">추천</span>
                       ) : null}
                       {row.is_serving ? (
-                        <span className="rounded border border-ai-cyan/40 px-2 py-1 text-[10px] font-bold text-ai-cyan">SERVING</span>
+                        <span className="rounded border border-ai-cyan/40 px-2 py-1 text-[10px] font-bold text-ai-cyan">서비스 적용</span>
                       ) : null}
                       {!row.is_latest && !row.is_recommended && !row.is_serving ? (
-                        <span className="rounded border border-slate-700 px-2 py-1 text-[10px] font-bold text-slate-500">TRACKED</span>
+                        <span className="rounded border border-slate-700 px-2 py-1 text-[10px] font-bold text-slate-500">분석 중</span>
                       ) : null}
                     </div>
                   </td>
@@ -423,7 +561,7 @@ function ReadinessItem({ label, status, detail }) {
         <span className={`rounded border px-2 py-1 text-[10px] font-bold ${
           status ? 'border-emerald-500/40 text-emerald-300' : 'border-amber-500/40 text-amber-300'
         }`}>
-          {status ? 'READY' : 'CHECK'}
+          {status ? '준비 완료' : '확인 필요'}
         </span>
       </div>
       <p className="mt-2 break-all whitespace-pre-line font-mono text-[10px] leading-5 text-slate-500">{detail}</p>
@@ -663,8 +801,8 @@ function VersionComparisonTable({ versions = [], selectedVersion, recommendedVer
                   <td className="px-2 py-2">{formatMetric(version.metrics?.time_series_cv_average?.precision_at_top_10pct || version.metrics?.precision_at_top_10pct)}</td>
                   <td className="px-2 py-2">{formatMetric(version.risk_metrics?.time_series_cv_average?.roc_auc || version.risk_metrics?.roc_auc)}</td>
                   <td className="px-2 py-2 font-mono">{formatVersionBacktest(version, 'excess_return_net')}</td>
-                  <td className="px-2 py-2">{formatPercent(version.backtests?.composite?.data?.selection_win_rate_net)}</td>
-                  <td className="px-2 py-2 font-mono">{formatReturnPercent(version.backtests?.composite?.data?.max_drawdown_net)}</td>
+                  <td className="px-2 py-2">{formatPercent(version.backtests?.composite?.data?.selection_win_rate_net ?? version.backtests?.composite?.data?.selection_win_rate)}</td>
+                  <td className="px-2 py-2 font-mono">{formatReturnPercent(version.backtests?.composite?.data?.max_drawdown_net ?? version.backtests?.composite?.data?.max_drawdown)}</td>
                   <td className="px-2 py-2">{version.metrics?.valid_rows ?? '-'}</td>
                   <td className="px-2 py-2">
                     <div className="flex flex-wrap gap-1">
@@ -675,21 +813,21 @@ function VersionComparisonTable({ versions = [], selectedVersion, recommendedVer
                             ? 'border-emerald-500/40 text-emerald-300'
                             : 'border-slate-700 text-slate-500'
                       }`}>
-                        {version.version === selectedVersion ? 'ACTIVE' : version.updated ? 'READY' : 'NO DATA'}
+                        {version.version === selectedVersion ? '분석 중' : version.updated ? '준비 완료' : '데이터 없음'}
                       </span>
                       {version.version === recommendedVersion ? (
                         <span className="rounded border border-emerald-500/30 px-2 py-1 text-[10px] font-bold text-emerald-300">
-                          PICK
+                          추천
                         </span>
                       ) : null}
                       {version.version === servingVersion || version.is_serving ? (
                         <span className="rounded border border-fuchsia-500/30 px-2 py-1 text-[10px] font-bold text-fuchsia-300">
-                          SERVING
+                          서비스 적용
                         </span>
                       ) : null}
                       {version.version === latestVersion ? (
                         <span className="rounded border border-slate-600 px-2 py-1 text-[10px] font-bold text-slate-300">
-                          LATEST
+                          최신
                         </span>
                       ) : null}
                     </div>
@@ -737,6 +875,43 @@ function ModelResultCard({ title, result }) {
       .filter((candidate) => candidate.version)
   }, [result?.latest_version, result?.recommended_version, result?.serving_version, versions])
 
+  const renderProgressBar = (value, minVal = 0.5, maxVal = 0.65) => {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return null
+    const num = Number(value)
+    const percent = Math.max(0, Math.min(100, ((num - minVal) / (maxVal - minVal)) * 100))
+    
+    let colorClass = 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
+    if (num >= 0.55) {
+      colorClass = 'bg-ai-cyan shadow-[0_0_8px_rgba(0,243,255,0.5)]'
+    } else if (num >= 0.51) {
+      colorClass = 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]'
+    }
+
+    return (
+      <div className="mt-2 h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+        <div 
+          className={`h-full rounded-full transition-all duration-500 ${colorClass}`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    )
+  }
+
+  const renderMetricValue = (val, isPercent = false, isReturn = false) => {
+    if (val === null || val === undefined || Number.isNaN(Number(val))) {
+      return <span className="font-mono text-slate-500">-</span>
+    }
+    const num = Number(val)
+    const text = isPercent ? formatPercent(num) : (isReturn ? formatReturnPercent(num) : formatMetric(num))
+    
+    if (num > 0) {
+      return <span className="font-mono text-emerald-400 font-bold">+{text}</span>
+    } else if (num < 0) {
+      return <span className="font-mono text-rose-500 font-bold">{text}</span>
+    }
+    return <span className="font-mono text-slate-300">{text}</span>
+  }
+
   return (
     <article className="rounded-lg border border-slate-700/80 bg-slate-surface p-5">
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -765,39 +940,42 @@ function ModelResultCard({ title, result }) {
 
       {metrics ? (
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-lg bg-[#0f172a] p-3">
-            <p className="text-xs font-bold text-slate-400">구분력</p>
-            <p className="mt-0.5 text-[10px] leading-4 text-slate-500">상승/비상승을 가르는 힘</p>
+          <div className="rounded-lg bg-[#0f172a] p-3 border border-slate-800 hover:border-slate-700 transition">
+            <p className="text-xs font-bold text-slate-400">구분력 (ROC-AUC)</p>
+            <p className="mt-0.5 text-[10px] leading-4 text-slate-500 font-sans">상승/비상승을 가르는 전체 힘</p>
             <p className="mt-1 font-mono text-xl font-bold text-white">{formatMetric(metrics.roc_auc)}</p>
+            {renderProgressBar(metrics.roc_auc, 0.5, 0.65)}
           </div>
-          <div className="rounded-lg bg-[#0f172a] p-3">
+          <div className="rounded-lg bg-[#0f172a] p-3 border border-slate-800 hover:border-slate-700 transition">
             <p className="text-xs font-bold text-slate-400">시계열 CV 구분력</p>
-            <p className="mt-0.5 text-[10px] leading-4 text-slate-500">기간을 나눠 다시 봤을 때의 평균 구분력</p>
+            <p className="mt-0.5 text-[10px] leading-4 text-slate-500 font-sans">기간 분할 검증 평균 구분력</p>
             <p className="mt-1 font-mono text-xl font-bold text-white">{formatMetric(metrics.time_series_cv_average?.roc_auc || metrics.roc_auc)}</p>
+            {renderProgressBar(metrics.time_series_cv_average?.roc_auc || metrics.roc_auc, 0.5, 0.65)}
           </div>
-          <div className="rounded-lg bg-[#0f172a] p-3">
+          <div className="rounded-lg bg-[#0f172a] p-3 border border-slate-800 hover:border-slate-700 transition">
             <p className="text-xs font-bold text-slate-400">상위 10% 적중</p>
-            <p className="mt-0.5 text-[10px] leading-4 text-slate-500">점수 상위 후보만 골랐을 때의 적중률</p>
+            <p className="mt-0.5 text-[10px] leading-4 text-slate-500 font-sans">점수 상위 후보의 실제 상승 비율</p>
             <p className="mt-1 font-mono text-xl font-bold text-white">{formatMetric(metrics.time_series_cv_average?.precision_at_top_10pct || metrics.precision_at_top_10pct)}</p>
+            {renderProgressBar(metrics.time_series_cv_average?.precision_at_top_10pct || metrics.precision_at_top_10pct, 0.1, 0.3)}
           </div>
-          <div className="rounded-lg bg-[#0f172a] p-3">
-            <p className="text-xs font-bold text-slate-400">상승 적중도</p>
-            <p className="mt-0.5 text-[10px] leading-4 text-slate-500">상승 후보 쪽 랭킹 품질</p>
+          <div className="rounded-lg bg-[#0f172a] p-3 border border-slate-800 hover:border-slate-700 transition">
+            <p className="text-xs font-bold text-slate-400">상승 적중도 (AP)</p>
+            <p className="mt-0.5 text-[10px] leading-4 text-slate-500 font-sans font-sans">상승 후보 쪽 랭킹 신뢰도</p>
             <p className="mt-1 font-mono text-xl font-bold text-white">{formatMetric(metrics.average_precision)}</p>
           </div>
-          <div className="rounded-lg bg-[#0f172a] p-3">
+          <div className="rounded-lg bg-[#0f172a] p-3 border border-slate-800 hover:border-slate-700 transition">
             <p className="text-xs font-bold text-slate-400">Precision / Recall</p>
-            <p className="mt-0.5 text-[10px] leading-4 text-slate-500">상승으로 찍은 것의 정확도 / 실제 상승을 놓치지 않는 비율</p>
+            <p className="mt-0.5 text-[10px] leading-4 text-slate-500 font-sans">예측 정확도 / 탐지 커버리지</p>
             <p className="mt-1 font-mono text-sm font-bold text-white">
               {formatMetric(metrics.precision)} / {formatMetric(metrics.recall)}
             </p>
           </div>
-          <div className="rounded-lg bg-[#0f172a] p-3">
+          <div className="rounded-lg bg-[#0f172a] p-3 border border-slate-800 hover:border-slate-700 transition">
             <p className="text-xs font-bold text-slate-400">전체 정답률</p>
-            <p className="mt-0.5 text-[10px] leading-4 text-slate-500">전체 0/1 판단 정답 비율</p>
+            <p className="mt-0.5 text-[10px] leading-4 text-slate-500 font-sans">전체 0/1 매칭 비율</p>
             <p className="mt-1 font-mono text-xl font-bold text-white">{formatMetric(metrics.accuracy)}</p>
           </div>
-          <div className="rounded-lg bg-[#0f172a] p-3 sm:col-span-3">
+          <div className="rounded-lg bg-[#0f172a] p-3 sm:col-span-3 border border-slate-800 font-sans">
             <p className="text-xs text-slate-500">학습/검증 구간</p>
             <p className="mt-1 break-words font-mono text-xs leading-5 text-slate-300">
               train {metrics.train_rows} rows: {metrics.train_start_date} ~ {metrics.train_end_date}
@@ -808,7 +986,7 @@ function ModelResultCard({ title, result }) {
           </div>
         </div>
       ) : (
-        <div className="rounded-lg border border-slate-800 bg-[#0f172a] p-4 text-sm text-slate-400">
+        <div className="rounded-lg border border-slate-800 bg-[#0f172a] p-4 text-sm text-slate-400 font-sans">
           아직 학습 결과 파일이 없습니다.
         </div>
       )}
@@ -819,34 +997,35 @@ function ModelResultCard({ title, result }) {
           {riskMetrics ? (
             <div className="mt-3 grid gap-2 sm:grid-cols-3">
               <div>
-                <p className="text-[10px] text-slate-500">구분력</p>
+                <p className="text-[10px] text-slate-500 font-sans">구분력 (ROC-AUC)</p>
                 <p className="font-mono text-sm text-white">{formatMetric(riskMetrics.roc_auc)}</p>
+                {renderProgressBar(riskMetrics.roc_auc, 0.5, 0.65)}
               </div>
               <div>
-                <p className="text-[10px] text-slate-500">상위후보 적중도</p>
+                <p className="text-[10px] text-slate-500 font-sans">상위후보 적중도</p>
                 <p className="font-mono text-sm text-white">{formatMetric(riskMetrics.average_precision)}</p>
               </div>
               <div>
-                <p className="text-[10px] text-slate-500">전체 정답률</p>
+                <p className="text-[10px] text-slate-500 font-sans">전체 정답률</p>
                 <p className="font-mono text-sm text-white">{formatMetric(riskMetrics.accuracy)}</p>
               </div>
             </div>
           ) : (
-            <p className="mt-3 text-sm text-slate-400">아직 risk_label 모델 결과가 없습니다.</p>
+            <p className="mt-3 text-sm text-slate-400 font-sans">아직 risk_label 모델 결과가 없습니다.</p>
           )}
         </div>
 
         <div className="rounded-lg border border-slate-800 bg-[#0f172a] p-4">
           <p className="text-xs font-bold uppercase tracking-wider text-slate-400">백테스트 요약</p>
           <div className="mt-3 grid gap-3">
-            <div className="rounded-lg border border-slate-800 bg-black/10 p-3">
+            <div className="rounded-lg border border-slate-800 bg-black/10 p-3 font-sans">
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">상승 점수 기준</p>
               {upOnlyBacktest ? (
                 <div className="mt-2 grid gap-1 text-xs text-slate-300">
-                  <p>상위 {upOnlyBacktest.top_n}개 평균 수익률: <span className="font-mono text-white">{formatReturnPercent(upOnlyBacktest.top_avg_future_return)}</span></p>
-                  <p>비용 반영 평균 수익률: <span className="font-mono text-white">{formatReturnPercent(upOnlyBacktest.top_avg_future_return_net)}</span></p>
-                  <p>전체 평균 수익률: <span className="font-mono text-white">{formatReturnPercent(upOnlyBacktest.universe_avg_future_return)}</span></p>
-                  <p>순 초과 수익률: <span className="font-mono text-ai-cyan">{formatReturnPercent(upOnlyBacktest.excess_return_net ?? upOnlyBacktest.excess_return)}</span></p>
+                  <p>상위 {upOnlyBacktest.top_n}개 평균 수익률: {renderMetricValue(upOnlyBacktest.top_avg_future_return, false, true)}</p>
+                  <p>비용 반영 평균 수익률: {renderMetricValue(upOnlyBacktest.top_avg_future_return_net, false, true)}</p>
+                  <p>전체 평균 수익률: {renderMetricValue(upOnlyBacktest.universe_avg_future_return, false, true)}</p>
+                  <p>순 초과 수익률: {renderMetricValue(upOnlyBacktest.excess_return_net ?? upOnlyBacktest.excess_return, false, true)}</p>
                   <p>후보 승률: <span className="font-mono text-white">{formatPercent(upOnlyBacktest.selection_win_rate_net ?? upOnlyBacktest.selection_win_rate)}</span></p>
                 </div>
               ) : (
@@ -854,16 +1033,16 @@ function ModelResultCard({ title, result }) {
               )}
             </div>
 
-            <div className="rounded-lg border border-slate-800 bg-black/10 p-3">
+            <div className="rounded-lg border border-slate-800 bg-black/10 p-3 font-sans">
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">복합 점수 기준</p>
               {compositeBacktest ? (
                 <div className="mt-2 grid gap-1 text-xs text-slate-300">
-                  <p>상위 {compositeBacktest.top_n}개 평균 수익률: <span className="font-mono text-white">{formatReturnPercent(compositeBacktest.top_avg_future_return)}</span></p>
-                  <p>비용 반영 평균 수익률: <span className="font-mono text-white">{formatReturnPercent(compositeBacktest.top_avg_future_return_net)}</span></p>
-                  <p>전체 평균 수익률: <span className="font-mono text-white">{formatReturnPercent(compositeBacktest.universe_avg_future_return)}</span></p>
-                  <p>순 초과 수익률: <span className="font-mono text-ai-cyan">{formatReturnPercent(compositeBacktest.excess_return_net ?? compositeBacktest.excess_return)}</span></p>
+                  <p>상위 {compositeBacktest.top_n}개 평균 수익률: {renderMetricValue(compositeBacktest.top_avg_future_return, false, true)}</p>
+                  <p>비용 반영 평균 수익률: {renderMetricValue(compositeBacktest.top_avg_future_return_net, false, true)}</p>
+                  <p>전체 평균 수익률: {renderMetricValue(compositeBacktest.universe_avg_future_return, false, true)}</p>
+                  <p>순 초과 수익률: {renderMetricValue(compositeBacktest.excess_return_net ?? compositeBacktest.excess_return, false, true)}</p>
                   <p>후보 승률: <span className="font-mono text-white">{formatPercent(compositeBacktest.selection_win_rate_net ?? compositeBacktest.selection_win_rate)}</span></p>
-                  <p>최대 낙폭: <span className="font-mono text-amber-300">{formatReturnPercent(compositeBacktest.max_drawdown_net)}</span></p>
+                  <p>최대 낙폭: <span className="font-mono text-rose-450 font-bold">{formatReturnPercent(compositeBacktest.max_drawdown_net)}</span></p>
                 </div>
               ) : (
                 <p className="mt-2 text-sm text-slate-400">아직 복합 백테스트 결과가 없습니다.</p>
@@ -894,7 +1073,18 @@ function ModelResultCard({ title, result }) {
                 className="grid gap-3 rounded-lg border border-slate-800 bg-[#0f172a] p-3 sm:grid-cols-[1fr_auto_auto_auto]"
               >
                 <div className="min-w-0">
-                  <p className="break-words text-sm font-bold text-white">{row.display_name || row.symbol}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="break-words text-sm font-bold text-white">{row.display_name || row.symbol}</p>
+                    {row.position ? (
+                      <span className={`rounded px-1.5 py-0.5 text-[9px] font-black tracking-widest ${
+                        row.position === 'SHORT'
+                          ? 'bg-rose-950/80 text-rose-300 border border-rose-700/60'
+                          : 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60'
+                      }`}>
+                        {row.position}
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     <span className="rounded border border-slate-700 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
                       {row.symbol}
@@ -966,6 +1156,11 @@ export default function AdminMlData({ isLoggedIn, userEmail, handleLogout }) {
   const [trainingMessage, setTrainingMessage] = useState('')
   const [automationLoadingKey, setAutomationLoadingKey] = useState('')
   const [automationMessage, setAutomationMessage] = useState('')
+  const [tuneTrials, setTuneTrials] = useState(20)
+  const [tuneUpdateConfig, setTuneUpdateConfig] = useState(true)
+  const [tuningLoadingKey, setTuningLoadingKey] = useState('')
+  const [tuningMessage, setTuningMessage] = useState('')
+  const [selectedLogJob, setSelectedLogJob] = useState(null)
 
   const selectedPreset = useMemo(() => presets[mode], [mode])
 
@@ -1384,6 +1579,57 @@ export default function AdminMlData({ isLoggedIn, userEmail, handleLogout }) {
     }
   }
 
+  const handleRunTuning = async (preset) => {
+    if (!isLoggedIn) {
+      setTuningMessage('로그인 후 사용할 수 있습니다.')
+      return
+    }
+
+    setTuningLoadingKey(preset.key)
+    setTuningMessage('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        setTuningMessage('로그인 세션이 만료되었습니다.')
+        return
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/ml/jobs/tune`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          config: preset.config,
+          trials: Number(tuneTrials),
+          update_config: tuneUpdateConfig,
+        }),
+      })
+      const payload = await response.json()
+      if (!response.ok || !payload.success) {
+        setTuningMessage(payload.message || '튜닝 실행에 실패했습니다.')
+        return
+      }
+
+      // Optuna 로그가 payload.data.stdout에 포함되어 있음
+      setTuningMessage(
+        payload.data?.success
+          ? `${preset.label} 작업이 완료되었습니다. (작업 ID: ${payload.data.job_id})`
+          : `${preset.label} 작업이 완료되었으나 실패 사유가 있습니다.`
+      )
+      await loadModelResults()
+      await loadJobHistory()
+      await loadRegistry()
+      await loadReadiness()
+      await loadReportHistory()
+    } catch (requestError) {
+      setTuningMessage(`서버 통신 실패: ${requestError.message}`)
+    } finally {
+      setTuningLoadingKey('')
+    }
+  }
+
   return (
     <div className="min-h-screen bg-obsidian-bg px-6 py-8 text-[#e2e2ec]">
       <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} />
@@ -1719,6 +1965,59 @@ export default function AdminMlData({ isLoggedIn, userEmail, handleLogout }) {
                 </div>
               ) : null}
             </div>
+
+            <div className="mt-6 border-t border-slate-800 pt-6">
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-ai-cyan">Optuna HPO Tuning</p>
+              <h3 className="mt-1 text-sm font-bold text-white">Optuna 하이퍼파라미터 최적화 (HPO)</h3>
+              
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <label className="flex flex-col gap-1.5 text-xs">
+                  <span className="font-bold text-slate-400">탐색 시도 횟수 (Trials)</span>
+                  <input
+                    type="number"
+                    min="5"
+                    max="100"
+                    value={tuneTrials}
+                    onChange={(e) => setTuneTrials(Number(e.target.value))}
+                    className="rounded border border-slate-700 bg-[#0f172a] px-3 py-2 text-white outline-none focus:border-ai-cyan font-mono"
+                  />
+                </label>
+                
+                <label className="flex items-center gap-2 rounded border border-slate-800 bg-[#0f172a]/70 px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={tuneUpdateConfig}
+                    onChange={(e) => setTuneUpdateConfig(e.target.checked)}
+                    className="h-4 w-4 accent-ai-cyan"
+                  />
+                  <span className="font-bold text-slate-300">최적 파라미터 자동 저장 (YAML)</span>
+                </label>
+              </div>
+
+              <div className="mt-4 grid gap-3">
+                {tuningPresets.map((preset) => (
+                  <button
+                    key={preset.key}
+                    type="button"
+                    onClick={() => handleRunTuning(preset)}
+                    disabled={tuningLoadingKey === preset.key || !isLoggedIn}
+                    className="rounded border border-slate-700 bg-[#0f172a] px-4 py-3 text-left transition hover:border-ai-cyan disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <p className="text-sm font-bold text-white">
+                      {tuningLoadingKey === preset.key ? '튜닝 진행 중...' : preset.label}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">{preset.summary}</p>
+                    <p className="mt-1 font-mono text-[9px] text-slate-500 break-all">{preset.config}</p>
+                  </button>
+                ))}
+              </div>
+
+              {tuningMessage ? (
+                <div className="mt-4 rounded-lg border border-ai-cyan/30 bg-ai-cyan/5 p-4 text-sm text-ai-cyan">
+                  {tuningMessage}
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <div className="rounded-lg border border-slate-700/80 bg-slate-surface p-5">
@@ -1737,10 +2036,20 @@ export default function AdminMlData({ isLoggedIn, userEmail, handleLogout }) {
               </button>
             </div>
 
-            <JobHistoryPanel jobs={jobHistory} loading={jobHistoryLoading} error={jobHistoryError} />
+            <JobHistoryPanel
+              jobs={jobHistory}
+              loading={jobHistoryLoading}
+              error={jobHistoryError}
+              onShowLog={setSelectedLogJob}
+            />
           </div>
         </section>
       </main>
+
+      <JobLogModal
+        job={selectedLogJob}
+        onClose={() => setSelectedLogJob(null)}
+      />
     </div>
   )
 }

@@ -69,9 +69,14 @@ model:
     - market_news_sentiment
     - market_news_article_count_24h
     - market_news_burst_zscore
+    - stoch_k_14
+    - stoch_d_3
+    - obv_zscore_20
 
 prediction:
   risk_model_path: models/lgbm_crypto_risk_v7.joblib
+  long_threshold: 0.29
+  short_threshold: 0.29
 
 labels:
   neutral_zone_abs_return: 0.002

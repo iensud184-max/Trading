@@ -1,0 +1,327 @@
+import os
+import time
+import threading
+import requests
+from datetime import datetime, timedelta
+from pathlib import Path
+
+from backend.services.ml_automation_service import resolve_automation_preset
+from backend.services.ml_job_service import create_job, list_jobs, update_job, run_ml_pipeline, run_ml_tuning
+from backend.services.supabase_client import (
+    sync_dataset_job_to_supabase,
+    sync_training_job_to_supabase,
+    sync_model_registry_to_supabase,
+    safe_query_supabase
+)
+from backend.utils.crypto_helper import CryptoHelper
+from backend.scripts.export_training_candles import (
+    DEFAULT_UNIVERSE_PATH,
+    fetch_binance_klines,
+    fetch_macro_indices,
+    fetch_toss_candles,
+    load_preset_symbols,
+    write_rows
+)
+
+PROJECT_ROOT = Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "default-dev-encryption-key-32bytes!")
+crypto = CryptoHelper(ENCRYPTION_KEY)
+
+# 모듈 수준의 전역 상태 변수
+_news_ingest_started = False
+_ml_automation_started = False
+
+def start_news_ingest_scheduler(news_ingest_service, news_ingest_enabled: bool, news_ingest_interval_seconds: int) -> None:
+    """뉴스 수집 스케줄러를 백그라운드 스레드로 구동합니다."""
+    global _news_ingest_started
+    if _news_ingest_started or not news_ingest_enabled:
+        return
+    _news_ingest_started = True
+
+    def _loop() -> None:
+        while True:
+            try:
+                news_ingest_service.run_once()
+            except Exception:
+                pass
+            now_kr = datetime.utcnow() + timedelta(hours=9)
+            is_weekday = now_kr.weekday() < 5
+            is_market_hours = is_weekday and (
+                (now_kr.hour > 9 or (now_kr.hour == 9 and now_kr.minute >= 0))
+                and (now_kr.hour < 15 or (now_kr.hour == 15 and now_kr.minute <= 30))
+            )
+            sleep_seconds = news_ingest_interval_seconds if is_market_hours else max(news_ingest_interval_seconds * 3, 1800)
+            time.sleep(sleep_seconds)
+
+    thread = threading.Thread(target=_loop, daemon=True)
+    thread.start()
+
+def start_ml_automation_scheduler(ml_automation_enabled: bool, supabase_service_role_key: str) -> None:
+    """ML 자동 수집 및 재학습 스케줄러를 백그라운드 스레드로 구동합니다."""
+    global _ml_automation_started
+    
+    # ML 전담 개발자(khs) 식별자 검증 안전장치 추가
+    developer_name = os.getenv("DEVELOPER_NAME")
+    if developer_name != "khs":
+        return
+
+    if _ml_automation_started or not ml_automation_enabled:
+        return
+    _ml_automation_started = True
+
+    def _loop() -> None:
+        last_stock_date = None
+        last_crypto_hour = None
+        crypto_run_count = 0
+
+        time.sleep(30)
+
+        while True:
+            try:
+                now_kr = datetime.utcnow() + timedelta(hours=9)
+                today_str = now_kr.strftime("%Y-%m-%d")
+                current_slot_hour = (now_kr.hour // 4) * 4
+                crypto_slot_str = f"{today_str} {current_slot_hour:02d}:00:00"
+
+                # 1. 코인 자동화 (4시간 주기)
+                if last_crypto_hour != crypto_slot_str:
+                    last_crypto_hour = crypto_slot_str  # 실행 시도 전에 먼저 등록하여 에러 발생 시 무한 재시도 방지
+                    try:
+                        preset = resolve_automation_preset("crypto-v7-full")
+                        dataset_config = preset["dataset"]
+                        training_config = preset["training"]
+                        
+                        # 48회 구동될 때마다(약 8일에 한 번) Auto-HPO 튜닝 수행
+                        if crypto_run_count > 0 and crypto_run_count % 48 == 0:
+                            try:
+                                run_ml_tuning(
+                                    config_path=training_config["config"],
+                                    trials=15,
+                                    update_config=True
+                                )
+                            except Exception:
+                                pass
+                        
+                        crypto_run_count += 1
+                        
+                        preset_symbols = load_preset_symbols(dataset_config["preset"], DEFAULT_UNIVERSE_PATH)
+                        symbols = list(dict.fromkeys([*(dataset_config.get("symbols") or []), *preset_symbols]))
+                        
+                        dataset_job = create_job(
+                            "dataset_export",
+                            {
+                                "label": preset["label"] + " (Auto)",
+                                "asset_type": dataset_config["asset_type"],
+                                "exchange": dataset_config["exchange"],
+                                "symbols": symbols,
+                                "preset_name": dataset_config.get("preset"),
+                                "interval": dataset_config["interval"],
+                                "count": dataset_config["count"],
+                            },
+                        )
+                        
+                        rows, failures = fetch_binance_klines(
+                            symbols,
+                            dataset_config["interval"],
+                            int(dataset_config["count"]),
+                            sleep_seconds=float(dataset_config.get("sleep_seconds", 0.2)),
+                            retry=int(dataset_config.get("retry", 2)),
+                            retry_wait_seconds=float(dataset_config.get("retry_wait_seconds", 10.0)),
+                        )
+                        output = PROJECT_ROOT / "ml" / "data" / "raw" / "crypto_candles.csv"
+                        write_rows(output, rows, append=bool(dataset_config.get("append", True)))
+                        
+                        update_job(
+                            dataset_job["id"],
+                            {
+                                "status": "success",
+                                "finished_at": datetime.utcnow().isoformat() + "Z",
+                                "output": str(output),
+                                "row_count": len(rows),
+                                "failure_count": len(failures),
+                                "failures": failures[:50],
+                                "symbols": symbols,
+                            },
+                        )
+                        
+                        train_job = create_job(
+                            "training_run",
+                            {
+                                "label": preset["label"] + " (Auto)",
+                                "config": training_config["config"],
+                                "risk_config": training_config.get("risk_config"),
+                                "summary_output": training_config.get("summary_output"),
+                                "skip_build_features": bool(training_config.get("skip_build_features", False)),
+                                "dataset_job_id": dataset_job["id"],
+                            },
+                        )
+                        
+                        result = run_ml_pipeline(
+                            config_path=training_config["config"],
+                            risk_config_path=training_config.get("risk_config"),
+                            skip_build_features=bool(training_config.get("skip_build_features", False)),
+                            summary_output=training_config.get("summary_output"),
+                        )
+                        
+                        update_job(
+                            train_job["id"],
+                            {
+                                "status": "success" if result["success"] else "failed",
+                                "finished_at": datetime.utcnow().isoformat() + "Z",
+                                "command": result["command"],
+                                "returncode": result["returncode"],
+                                "stdout": result["stdout"][-8000:],
+                                "stderr": result["stderr"][-8000:],
+                            },
+                        )
+                        
+                        if supabase_service_role_key:
+                            auth_header = f"Bearer {supabase_service_role_key}"
+                            latest_ds_job = next((j for j in list_jobs(limit=100) if j.get("id") == dataset_job["id"]), None)
+                            if latest_ds_job:
+                                sync_dataset_job_to_supabase(auth_header, latest_ds_job)
+                            latest_tr_job = next((j for j in list_jobs(limit=100) if j.get("id") == train_job["id"]), None)
+                            if latest_tr_job:
+                                sync_training_job_to_supabase(auth_header, latest_tr_job)
+                            sync_model_registry_to_supabase(auth_header, training_config.get("summary_output"))
+                        
+                    except Exception:
+                        pass
+
+                # 2. 주식 자동화 (평일 16:30 ~ 17:00 사이, 하루 1회)
+                is_weekday = now_kr.weekday() < 5
+                if is_weekday and now_kr.hour == 16 and 30 <= now_kr.minute <= 59:
+                    if last_stock_date != today_str:
+                        last_stock_date = today_str  # 실행 시도 전에 먼저 등록하여 에러 발생 시 무한 재시도 방지
+                        if supabase_service_role_key:
+                            try:
+                                auth_header = f"Bearer {supabase_service_role_key}"
+                                toss_keys = safe_query_supabase(auth_header, "user_api_keys", "GET", params={"broker_name": "eq.TOSS"})
+                                if toss_keys:
+                                    record = toss_keys[0]
+                                    client_id = crypto.decrypt(record.get("encrypted_access_key"))
+                                    client_secret = crypto.decrypt(record.get("encrypted_secret_key"))
+                                    
+                                    token_res = requests.post(
+                                        "https://open-api.tossinvest.com/oauth2/token",
+                                        headers={"Content-Type": "application/x-www-form-urlencoded"},
+                                        data={
+                                            "grant_type": "client_credentials",
+                                            "client_id": client_id,
+                                            "client_secret": client_secret,
+                                        },
+                                        timeout=10,
+                                    )
+                                    token_json = token_res.json()
+                                    access_token = token_json.get("access_token")
+                                    
+                                    if access_token:
+                                        preset = resolve_automation_preset("stock-v7-full")
+                                        dataset_config = preset["dataset"]
+                                        training_config = preset["training"]
+                                        
+                                        # 금요일 16:30 학습 기동 시 Auto-HPO 튜닝 선행 적용
+                                        if now_kr.weekday() == 4:
+                                            try:
+                                                run_ml_tuning(
+                                                    config_path=training_config["config"],
+                                                    trials=15,
+                                                    update_config=True
+                                                )
+                                            except Exception:
+                                                pass
+                                        
+                                        preset_symbols = load_preset_symbols(dataset_config["preset"], DEFAULT_UNIVERSE_PATH)
+                                        symbols = list(dict.fromkeys([*(dataset_config.get("symbols") or []), *preset_symbols]))
+                                        
+                                        dataset_job = create_job(
+                                            "dataset_export",
+                                            {
+                                                "label": preset["label"] + " (Auto)",
+                                                "asset_type": dataset_config["asset_type"],
+                                                "exchange": dataset_config["exchange"],
+                                                "symbols": symbols,
+                                                "preset_name": dataset_config.get("preset"),
+                                                "interval": dataset_config["interval"],
+                                                "count": dataset_config["count"],
+                                            },
+                                        )
+                                        
+                                        macro_rows = fetch_macro_indices(int(dataset_config["count"]))
+                                        macro_output = PROJECT_ROOT / "ml" / "data" / "raw" / "macro_indices.csv"
+                                        write_rows(macro_output, macro_rows, append=bool(dataset_config.get("append", True)))
+                                        
+                                        rows, failures = fetch_toss_candles(
+                                            symbols,
+                                            access_token,
+                                            dataset_config["interval"],
+                                            int(dataset_config["count"]),
+                                            sleep_seconds=float(dataset_config.get("sleep_seconds", 2.0)),
+                                            retry=int(dataset_config.get("retry", 3)),
+                                            retry_wait_seconds=float(dataset_config.get("retry_wait_seconds", 60.0)),
+                                        )
+                                        output = PROJECT_ROOT / "ml" / "data" / "raw" / "stock_candles.csv"
+                                        write_rows(output, rows, append=bool(dataset_config.get("append", True)))
+                                        
+                                        update_job(
+                                            dataset_job["id"],
+                                            {
+                                                "status": "success",
+                                                "finished_at": datetime.utcnow().isoformat() + "Z",
+                                                "output": str(output),
+                                                "row_count": len(rows),
+                                                "failure_count": len(failures),
+                                                "failures": failures[:50],
+                                                "symbols": symbols,
+                                            },
+                                        )
+                                        
+                                        train_job = create_job(
+                                            "training_run",
+                                            {
+                                                "label": preset["label"] + " (Auto)",
+                                                "config": training_config["config"],
+                                                "risk_config": training_config.get("risk_config"),
+                                                "summary_output": training_config.get("summary_output"),
+                                                "skip_build_features": bool(training_config.get("skip_build_features", False)),
+                                                "dataset_job_id": dataset_job["id"],
+                                            },
+                                        )
+                                        
+                                        result = run_ml_pipeline(
+                                            config_path=training_config["config"],
+                                            risk_config_path=training_config.get("risk_config"),
+                                            skip_build_features=bool(training_config.get("skip_build_features", False)),
+                                            summary_output=training_config.get("summary_output"),
+                                        )
+                                        
+                                        update_job(
+                                            train_job["id"],
+                                            {
+                                                "status": "success" if result["success"] else "failed",
+                                                "finished_at": datetime.utcnow().isoformat() + "Z",
+                                                "command": result["command"],
+                                                "returncode": result["returncode"],
+                                                "stdout": result["stdout"][-8000:],
+                                                "stderr": result["stderr"][-8000:],
+                                            },
+                                        )
+                                        
+                                        latest_ds_job = next((j for j in list_jobs(limit=100) if j.get("id") == dataset_job["id"]), None)
+                                        if latest_ds_job:
+                                            sync_dataset_job_to_supabase(auth_header, latest_ds_job)
+                                        latest_tr_job = next((j for j in list_jobs(limit=100) if j.get("id") == train_job["id"]), None)
+                                        if latest_tr_job:
+                                            sync_training_job_to_supabase(auth_header, latest_tr_job)
+                                        sync_model_registry_to_supabase(auth_header, training_config.get("summary_output"))
+                                        
+                            except Exception:
+                                pass
+
+            except Exception:
+                pass
+            
+            time.sleep(60)
+
+    thread = threading.Thread(target=_loop, daemon=True)
+    thread.start()

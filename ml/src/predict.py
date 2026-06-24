@@ -71,18 +71,47 @@ def main() -> None:
     latest_df["up_signal_score"] = (latest_df["up_probability"] * 100).round(2)
     latest_df["up_model_version"] = model_config["model"]["version"]
 
+    asset_type = config["model"].get("asset_type", "STOCK").upper()
+    long_threshold = float(config.get("prediction", {}).get("long_threshold", 0.30))
+    short_threshold = float(config.get("prediction", {}).get("short_threshold", 0.70))
+
     if risk_model is not None:
         risk_probabilities = risk_model.predict_proba(latest_df[risk_feature_columns])[:, 1]
         risk_probabilities = apply_probability_calibration(risk_probabilities, risk_calibrator)
         latest_df["risk_probability"] = risk_probabilities
         latest_df["risk_signal_score"] = (latest_df["risk_probability"] * 100).round(2)
         latest_df["risk_model_version"] = risk_payload["config"]["model"]["version"]
-        latest_df["signal_score"] = ((latest_df["up_probability"] - latest_df["risk_probability"]) * 100).round(2)
+        
+        positions = []
+        scores = []
+        for idx, row in latest_df.iterrows():
+            up_p = row["up_probability"]
+            risk_p = row["risk_probability"]
+            if asset_type == "CRYPTO":
+                if risk_p < long_threshold:
+                    positions.append("LONG")
+                    scores.append(up_p * 100)
+                elif risk_p > short_threshold:
+                    positions.append("SHORT")
+                    scores.append(risk_p * 100)
+                else:
+                    positions.append("HOLD")
+                    scores.append(0.0)
+            else:
+                if risk_p < long_threshold:
+                    positions.append("LONG")
+                    scores.append(up_p * 100)
+                else:
+                    positions.append("HOLD")
+                    scores.append(0.0)
+        latest_df["position"] = positions
+        latest_df["signal_score"] = [round(s, 2) for s in scores]
         latest_df["scoring_strategy"] = "composite"
     else:
         latest_df["risk_probability"] = 1 - latest_df["up_probability"]
         latest_df["risk_signal_score"] = (latest_df["risk_probability"] * 100).round(2)
         latest_df["risk_model_version"] = ""
+        latest_df["position"] = "LONG"
         latest_df["signal_score"] = latest_df["up_signal_score"]
         latest_df["scoring_strategy"] = "up_only"
 
@@ -100,6 +129,7 @@ def main() -> None:
         "risk_signal_score",
         "signal_score",
         "scoring_strategy",
+        "position",
         "up_model_version",
         "risk_model_version",
         "model_version",

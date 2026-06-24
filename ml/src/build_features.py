@@ -28,6 +28,23 @@ def resolve_ml_path(config_path: str, target_path: str) -> Path:
     return path if path.is_absolute() else base_dir / path
 
 
+def calculate_stochastic(high: pd.Series, low: pd.Series, close: pd.Series, k_period: int = 14, d_period: int = 3) -> tuple[pd.Series, pd.Series]:
+    lowest_low = low.rolling(k_period, min_periods=k_period).min()
+    highest_high = high.rolling(k_period, min_periods=k_period).max()
+    denominator = highest_high - lowest_low
+    stoch_k = 100 * (close - lowest_low) / denominator.replace(0, np.nan)
+    stoch_k = stoch_k.fillna(50.0)
+    stoch_d = stoch_k.rolling(d_period, min_periods=d_period).mean().fillna(50.0)
+    return stoch_k, stoch_d
+
+
+def calculate_obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    close_diff = close.diff()
+    direction = np.sign(close_diff).fillna(0.0)
+    obv = (direction * volume).cumsum()
+    return obv
+
+
 def calculate_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     delta = close.diff()
     gain = delta.clip(lower=0)
@@ -252,6 +269,9 @@ def build_features(candles: pd.DataFrame, config: dict) -> pd.DataFrame:
         group["atr_14"] = calculate_atr(high, low, close, 14)
         group["bollinger_position_20"] = calculate_bollinger_position(close, 20)
         group["range_ratio_1"] = (high - low) / close.replace(0, np.nan)
+        group["stoch_k_14"], group["stoch_d_3"] = calculate_stochastic(high, low, close, 14, 3)
+        obv = calculate_obv(close, volume)
+        group["obv_zscore_20"] = rolling_zscore(obv, 20)
         group["close_to_high_20"] = close / high.rolling(20, min_periods=1).max() - 1
         group["close_to_low_20"] = close / low.rolling(20, min_periods=1).min() - 1
         group["body_ratio_1"] = (close - open_price).abs() / close.replace(0, np.nan)
@@ -348,6 +368,9 @@ def build_features(candles: pd.DataFrame, config: dict) -> pd.DataFrame:
         "price_limit_proximity",
         "turnover_ratio",
         "market_open_flag",
+        "stoch_k_14",
+        "stoch_d_3",
+        "obv_zscore_20",
     ]:
         if column not in features.columns:
             features[column] = 0.0

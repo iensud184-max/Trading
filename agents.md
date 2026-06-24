@@ -34,13 +34,19 @@
          v
   [Flask Backend] (API Gateway & Worker)
          |
-         +-- [utils/crypto_helper.py]    : API 크리덴셜 민감정보 AES-256 양방향 암호화
-         +-- [services/toss_client.py]   : Toss Open API 메인 주식 클라이언트
-         +-- [services/kis_client.py]    : KIS 레거시/보류 주식 클라이언트
-         +-- [services/coinone_client.py]: 코인원 메인 가상자산 클라이언트
-         +-- [services/binance_client.py]: 바이낸스 확장 가상자산 클라이언트
-         +-- [services/agent.py]         : LangChain 활용 LLM Tool-calling 오케스트레이터
-         +-- [services/trading_engine.py]: Background Thread Pool 기반 조건 감시 엔진
+         +-- [routes/home.py, keys.py, ml.py, news.py] : Blueprint 기반 API 라우트 레이어
+         +-- [utils/crypto_helper.py, file_helpers.py] : 암호화 및 파일 처리 공통 유틸리티
+         +-- [services/auth_service.py]                  : Authorization 헤더 디코딩
+         +-- [services/supabase_client.py]              : Supabase DB 및 작업 동기화
+         +-- [services/home_service.py]                  : 대시보드 및 잔고 융합 헬퍼
+         +-- [services/toss_client.py]                   : Toss Open API 메인 주식 클라이언트
+         +-- [services/kis_client.py]                    : KIS 레거시/보류 주식 클라이언트
+         +-- [services/coinone_client.py]                : 코인원 메인 가상자산 클라이언트
+         +-- [services/binance_client.py]                : 바이낸스 확장 가상자산 클라이언트
+         +-- [services/ml_model_service.py]              : ML 모델 정보 조회 및 실험 리포트 기동
+         +-- [services/ml_scheduler.py]                  : 백그라운드 스레드 기반 스케줄러 워커
+         +-- [services/agent.py]                         : LangChain 활용 LLM Tool-calling 오케스트레이터
+         +-- [services/trading_engine.py]                : Background Thread Pool 기반 조건 감시 엔진
          |
          v
   [Supabase DB] & [External APIs] (Toss / Coinone / Binance / Tavily News / KIS API)

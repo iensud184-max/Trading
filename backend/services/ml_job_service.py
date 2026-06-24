@@ -106,3 +106,36 @@ def run_ml_pipeline(
         "stderr": completed.stderr,
         "success": completed.returncode == 0,
     }
+
+
+def run_ml_tuning(
+    config_path: str,
+    trials: int = 20,
+    update_config: bool = False,
+) -> dict[str, Any]:
+    python_bin = resolve_ml_python()
+    command = [
+        python_bin,
+        "ml/src/tune_hyperparameters.py",
+        "--config",
+        config_path,
+        "--trials",
+        str(trials),
+    ]
+    if update_config:
+        command.append("--update-config")
+
+    completed = subprocess.run(
+        command,
+        cwd=PROJECT_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return {
+        "command": command,
+        "returncode": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "success": completed.returncode == 0,
+    }

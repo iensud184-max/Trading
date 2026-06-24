@@ -44,6 +44,11 @@ def upsert_model_registry(row: dict[str, Any]) -> dict[str, Any]:
     if not asset_type or not model_version:
         raise ValueError("asset_type과 model_version이 필요합니다.")
 
+    if row.get("is_serving"):
+        for item in rows:
+            if str(item.get("asset_type", "")).upper() == asset_type:
+                item["is_serving"] = False
+
     target = None
     for item in rows:
         if str(item.get("asset_type", "")).upper() == asset_type and str(item.get("model_version", "")) == model_version:

@@ -146,6 +146,7 @@ def normalize_universe_rows(records: list[dict[str, Any]]) -> list[dict[str, Any
         if market_segment not in {"KOSPI", "KOSDAQ", "KONEX", "ETF", "ETN"}:
             market_segment = "OTHER"
 
+
         listed_at = str(row.get("listed_at") or row.get("listing_date") or row.get("상장일") or row.get("상장일자") or "").strip()
 
         normalized.append({
@@ -211,11 +212,13 @@ def build_turnover_snapshot_rows(
             try:
                 snapshots.append(future.result())
             except Exception as exc:
+
                 errors.append({
                     "symbol": row.get("symbol"),
                     "name": row.get("name"),
                     "error": str(exc),
                 })
+
 
     snapshots.sort(key=lambda item: item["trading_value"], reverse=True)
     return snapshots, errors
@@ -253,8 +256,8 @@ class KISMarketUniverseService:
         master_rows = _dedupe_rows(master_rows)
         if not master_rows:
             raise ValueError("종목 정보 파일에서 저장할 종목을 찾지 못했습니다.")
-
         self.repository.upsert_stock_master(master_rows)
+
 
         quote_rows: list[dict[str, Any]] = []
         quote_errors: list[dict[str, Any]] = []

@@ -253,31 +253,122 @@ class TossClient(ExchangeClient):
 
     def _get_price_impl(self, symbol: str) -> dict:
         token = self._get_cached_token()
-        url = f"{self.base_url}/api/v1/prices"
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json"
         }
-        params = {"symbol": symbol}
-        res = requests.get(url, headers=headers, params=params)
-        
-        if res.status_code != 200:
-            raise Exception(f"토스 시세 조회 실패: {res.text}")
-            
-        data = res.json()
-        result = data.get("result", {})
-        
-        try:
-            current_price = float(result.get("currentPrice", 0.0))
-            change_rate = float(result.get("changeRate", 0.0))
-        except (ValueError, TypeError):
-            current_price = 0.0
-            change_rate = 0.0
+
+        # 종목코드 보정 및 variants 생성 (예: 005930 -> [005930, A005930])
+        symbol_variants = [symbol]
+        if symbol.isdigit() and len(symbol) == 6:
+            symbol_variants.append(f"A{symbol}")
+
+        last_error = None
+        last_raw = None
+
+        for candidate in symbol_variants:
+            url = f"{self.base_url}/api/v1/prices"
+            # Toss API는 'symbol' 파라미터 또는 'symbols' 파라미터를 사용합니다.
+            # 양방향 대응을 위해 둘 다 지원하도록 순차 조회
+            res = requests.get(url, headers=headers, params={"symbol": candidate}, timeout=15)
+            if res.status_code != 200:
+                res = requests.get(url, headers=headers, params={"symbols": candidate}, timeout=15)
+
+            if res.status_code != 200:
+                last_error = f"{candidate}: {res.text}"
+                continue
+
+            data = res.json()
+            last_raw = data
+            if isinstance(data, dict) and data.get("error"):
+                err = data["error"]
+                last_error = f"{candidate}: {err.get('message') or err}"
+                continue
+
+            result = data.get("result", {})
+            # result가 없거나 비어있는 경우 data 또는 output을 후보군으로 확인
+            if not result or not isinstance(result, dict):
+                for k in ("output", "data"):
+                    if isinstance(data, dict) and data.get(k):
+                        result = data.get(k)
+                        break
+
+            # 리스트 형태 등으로 들어오는 경우 첫번째 레코드 취함
+            if isinstance(result, list) and len(result) > 0:
+                result = result[0]
+            if not isinstance(result, dict):
+                result = {}
+
+            try:
+                current_price = float(
+                    result.get("currentPrice")
+                    or result.get("current_price")
+                    or result.get("closePrice")
+                    or result.get("close_price")
+                    or result.get("price")
+                    or result.get("lastPrice")
+                    or result.get("last_price")
+                    or 0.0
+                )
+                change_rate = float(
+                    result.get("changeRate")
+                    or result.get("change_rate")
+                    or result.get("changePercent")
+                    or result.get("change_percent")
+                    or result.get("prdy_ctrt")
+                    or 0.0
+                )
+                prev_close = float(
+                    result.get("previousClosePrice")
+                    or result.get("prev_close_price")
+                    or result.get("basePrice")
+                    or result.get("base_price")
+                    or 0.0
+                )
+            except (ValueError, TypeError):
+                current_price = 0.0
+                change_rate = 0.0
+                prev_close = 0.0
+
+            # 이전 종가 획득 보조 (캔들 보조 조회)
+            if not prev_close:
+                try:
+                    candle_res = requests.get(
+                        f"{self.base_url}/api/v1/candles",
+                        headers=headers,
+                        params={"symbol": candidate, "interval": "1d", "count": 2},
+                        timeout=15
+                    )
+                    if candle_res.status_code == 200:
+                        candle_data = candle_res.json()
+                        candles = candle_data.get("result", {}).get("candles", []) or candle_data.get("result", [])
+                        if isinstance(candles, list) and len(candles) >= 2:
+                            prev_close = float(candles[-2].get("closePrice") or candles[-2].get("close") or 0.0)
+                        elif isinstance(candles, list) and len(candles) >= 1:
+                            prev_close = float(candles[-1].get("closePrice") or candles[-1].get("close") or 0.0)
+                except Exception:
+                    pass
+
+            if current_price and prev_close and not change_rate:
+                change_rate = ((current_price - prev_close) / prev_close) * 100 if prev_close else 0.0
+
+            if current_price or change_rate or prev_close:
+                return {
+                    "current_price": current_price,
+                    "change_rate": change_rate,
+                    "previous_close": prev_close,
+                    "symbol_used": candidate,
+                    "raw": data
+                }
+
+            last_error = f"{candidate}: empty price payload"
 
         return {
-            "current_price": current_price,
-            "change_rate": change_rate,
-            "raw": data
+            "current_price": 0.0,
+            "change_rate": 0.0,
+            "previous_close": 0.0,
+            "symbol_used": symbol_variants[-1],
+            "raw": last_raw or {"error": last_error or "empty price payload"}
         }
 
     def get_price(self, symbol: str) -> dict:

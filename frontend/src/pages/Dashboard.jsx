@@ -557,6 +557,42 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                 </div>
               ) : null}
 
+              {/* 종목 퀵 검색 이동 터미널 */}
+              <div className="bg-slate-surface border border-slate-700/80 rounded-lg p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">종목 퀵 이동 터미널</h3>
+                  <p className="text-[11px] text-slate-400 mt-1">원하는 주식코드나 가상자산 심볼을 입력하여 상세 차트와 수동 매매 창으로 즉시 이동합니다.</p>
+                </div>
+                <form onSubmit={handleSearchGo} className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <div className="flex bg-slate-800 p-0.5 rounded border border-slate-700 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setSearchAssetType('STOCK')}
+                      className={`px-3 py-1.5 rounded transition-all cursor-pointer font-bold ${searchAssetType === 'STOCK' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}
+                    >
+                      주식
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSearchAssetType('CRYPTO')}
+                      className={`px-3 py-1.5 rounded transition-all cursor-pointer font-bold ${searchAssetType === 'CRYPTO' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}
+                    >
+                      코인
+                    </button>
+                  </div>
+                  <div className="relative w-full sm:w-48">
+                    <input
+                      type="text"
+                      value={searchSymbol}
+                      onChange={handleSearchInputChange}
+                      onFocus={() => { if (searchSymbol.trim()) setShowSuggestions(true) }}
+                      onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                      placeholder={searchAssetType === 'STOCK' ? '예: 005930 또는 AAPL' : '예: BTC 또는 ETH'}
+                      className="bg-[#0f172a] border border-slate-700 text-[#e2e2ec] font-mono text-xs rounded px-3 py-2 w-full focus:outline-none focus:border-blue-600"
+                      required
+                      autoComplete="off"
+                    />
+
                     {showSuggestions && suggestions.length > 0 && (
                       <div className="absolute left-0 right-0 mt-1 bg-[#090d1a]/95 border border-[#1f2945] rounded-lg shadow-2xl z-50 max-h-60 overflow-y-auto backdrop-blur-md">
                         {suggestions.map((item) => (

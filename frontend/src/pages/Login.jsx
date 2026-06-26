@@ -16,7 +16,7 @@ export default function Login() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        navigate('/Home')
+        navigate('/')
       }
     })
   }, [navigate])
@@ -35,7 +35,7 @@ export default function Login() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'kakao',
         options: {
-          redirectTo: `${window.location.origin}/Home`,
+          redirectTo: `${window.location.origin}/`,
           queryParams: {
             scope: 'account_email' // 프로필 이미지를 배제하고 이메일 권한만 요청
           }
@@ -79,7 +79,7 @@ export default function Login() {
           {/* 돌아가기 */}          
           <div className="mt-6 text-center">
             <button 
-              onClick={() => navigate('/Home')}
+              onClick={() => navigate('/')}
               className="text-xs text-slate-500 hover:text-slate-300 transition-colors underline cursor-pointer"
             >
               ← 홈으로 돌아가기

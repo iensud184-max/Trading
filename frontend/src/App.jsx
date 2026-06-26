@@ -256,6 +256,15 @@ export default function App() {
         setUserEmail(session.user.email)
         setUserId(session.user.id)
 
+        // OAuth 로그인 후 주소창의 # 해시 잔재물 제거
+        if (window.location.hash) {
+          window.history.replaceState(
+            null,
+            document.title,
+            window.location.pathname + window.location.search
+          )
+        }
+
         try {
           const { data } = await supabase
             .from('profiles')

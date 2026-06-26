@@ -5,7 +5,6 @@ import Header from "../components/Header.jsx";
 const filters = {
   region: ["전체", "국내", "해외"],
   ranking: ["거래대금", "거래량", "상승률", "하락률"],
-  horizon: ["실시간", "1일", "1주일", "1개월", "3개월", "6개월", "1년"],
 };
 
 function getKoreanMarketState() {
@@ -93,7 +92,7 @@ function numericMetric(row, metric) {
   return Number.isFinite(value) ? value : 0;
 }
 
-function applyClientStockFilters(rows, activeFilters) {
+function applyClientMarketFilters(rows, activeFilters) {
   const filtered = [...rows];
   const ranking = activeFilters.ranking || activeFilters.metric || "거래대금";
 
@@ -134,12 +133,23 @@ function FilterChip({ label, active = false, onClick }) {
   );
 }
 
+function FilterBar({ title, children }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-slate-800/80 bg-[#07111d]/70 px-3 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">{title}</div>
+      <div className="flex flex-wrap items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
 function MarketTable({ rows, titleType = "stock", ranking = "거래대금" }) {
   const isStock = titleType === "stock";
   const nameHeader = isStock ? "종목명" : "코인명";
-  const showStockVolume = isStock && ranking === "거래량";
-  const valueHeader = isStock ? (showStockVolume ? "거래량" : "거래대금") : "거래대금(24H)";
-  const valueKey = showStockVolume ? "volume" : "value";
+  const showVolume = ranking === "거래량";
+  const valueHeader = isStock
+    ? (showVolume ? "거래량" : "거래대금")
+    : (showVolume ? "거래량" : "거래대금");
+  const valueKey = showVolume ? "volume" : "value";
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-600/80 bg-[#061321]/90 shadow-[0_0_28px_rgba(0,224,255,0.06)]">
@@ -177,7 +187,7 @@ function MarketTable({ rows, titleType = "stock", ranking = "거래대금" }) {
                 className="text-[24px] leading-none text-slate-400 hover:text-ai-cyan"
                 aria-label="관심 종목"
               >
-                {isStock ? "♡" : "☆"}
+                ♡
               </button>
               <div className="text-center text-[16px] text-slate-100 tabular-nums">{row.rank}</div>
               <div className="flex min-w-0 items-center gap-3">
@@ -204,9 +214,11 @@ function MarketTable({ rows, titleType = "stock", ranking = "거래대금" }) {
 }
 
 function MobileMarketTable({ rows, titleType = "stock", ranking = "거래대금" }) {
-  const showStockVolume = titleType === "stock" && ranking === "거래량";
-  const valueKey = showStockVolume ? "volume" : "value";
-  const valueLabel = titleType === "stock" ? (showStockVolume ? "거래량" : "거래대금") : "거래대금";
+  const showVolume = ranking === "거래량";
+  const valueKey = showVolume ? "volume" : "value";
+  const valueLabel = titleType === "stock"
+    ? (showVolume ? "거래량" : "거래대금")
+    : (showVolume ? "거래량" : "거래대금");
   return (
     <div className="divide-y divide-slate-700/70 overflow-hidden rounded-lg border border-slate-700 bg-[#061321]/90 md:hidden">
       {rows.length === 0 ? (
@@ -236,7 +248,7 @@ function MobileMarketTable({ rows, titleType = "stock", ranking = "거래대금"
                 className="text-[22px] text-slate-400 hover:text-ai-cyan"
                 aria-label="관심 종목"
               >
-                {titleType === "stock" ? "♡" : "☆"}
+                ♡
               </button>
             </div>
             <div className="mt-3 grid grid-cols-3 gap-2 text-right text-[13px]">
@@ -268,17 +280,24 @@ export default function Home({ isLoggedIn, userEmail, handleLogout }) {
   const [marketState, setMarketState] = useState(getKoreanMarketState());
   const [snapshotMeta, setSnapshotMeta] = useState({});
   const [updatedAt, setUpdatedAt] = useState("");
-  const [activeFilters, setActiveFilters] = useState({
+  const [stockFilters, setStockFilters] = useState({
     region: "전체",
     ranking: "거래대금",
     horizon: "실시간",
   });
+  const [coinFilters, setCoinFilters] = useState({
+    ranking: "거래대금",
+  });
   const stocks = useMemo(
-    () => applyClientStockFilters(stockCandidates, activeFilters).slice(0, 10),
-    [stockCandidates, activeFilters.ranking],
+    () => applyClientMarketFilters(stockCandidates, stockFilters).slice(0, 10),
+    [stockCandidates, stockFilters.ranking],
+  );
+  const filteredCoins = useMemo(
+    () => applyClientMarketFilters(coins, coinFilters).slice(0, 10),
+    [coins, coinFilters.ranking],
   );
 
-  const loadOverview = async (requestFilters = activeFilters) => {
+  const loadOverview = async (requestFilters = stockFilters) => {
       try {
         setStatus("loading");
         const currentMarketState = getKoreanMarketState();
@@ -302,10 +321,7 @@ export default function Home({ isLoggedIn, userEmail, handleLogout }) {
         const unsupportedHorizon = requestFilters.horizon !== "실시간"
           ? "기간별 랭킹은 아직 지원하지 않아 실시간 기준으로 표시됩니다."
           : "";
-        const staleMessage = marketSnapshot.stale && stockRows.length > 0
-          ? "주식 스냅샷이 지연되어 마지막 저장값을 표시합니다."
-          : "";
-        setMessage([data.data?.message || "", unsupportedHorizon, staleMessage].filter(Boolean).join(" "));
+        setMessage([data.data?.message || "", unsupportedHorizon].filter(Boolean).join(" "));
         setUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
         setStatus("ready");
       } catch (error) {
@@ -317,13 +333,25 @@ export default function Home({ isLoggedIn, userEmail, handleLogout }) {
       }
     };
 
+  const refreshOverview = () => {
+    loadOverview({
+      region: stockFilters.region,
+      ranking: "거래대금",
+      horizon: stockFilters.horizon,
+    });
+  };
+  const marketStatusText = message
+    || (status === "loading"
+      ? "시장 데이터를 불러오는 중입니다."
+      : `시장 데이터 정상 표시 중${snapshotMeta.as_of ? ` · 기준 ${formatSnapshotTime(snapshotMeta.as_of)}` : updatedAt ? ` · ${updatedAt}` : ""}`);
+
   useEffect(() => {
     let timeoutId;
     let cancelled = false;
     const requestFilters = {
-      region: activeFilters.region,
+      region: stockFilters.region,
       ranking: "거래대금",
-      horizon: activeFilters.horizon,
+      horizon: stockFilters.horizon,
     };
 
     const scheduleNextLoad = () => {
@@ -345,7 +373,7 @@ export default function Home({ isLoggedIn, userEmail, handleLogout }) {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [activeFilters.region, activeFilters.horizon]);
+  }, [stockFilters.region, stockFilters.horizon]);
 
   return (
     <div className="min-h-screen bg-obsidian-bg text-[#e2e2ec] font-inter">
@@ -356,60 +384,69 @@ export default function Home({ isLoggedIn, userEmail, handleLogout }) {
           <section className="ai-glass rounded-lg p-4 sm:p-6">
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="mr-2 text-[11px] uppercase tracking-[0.26em] text-slate-500">실시간 필터</span>
-                  {filters.region.map((label) => (
-                    <FilterChip
-                      key={label}
-                      label={label}
-                      active={activeFilters.region === label}
-                      onClick={() => setActiveFilters((prev) => ({ ...prev, region: label }))}
-                    />
-                  ))}
-                  <span className="mx-2 hidden h-7 w-px bg-slate-700 md:block" />
-                  {filters.ranking.map((label) => (
-                    <FilterChip
-                      key={label}
-                      label={label}
-                      active={activeFilters.ranking === label}
-                      onClick={() => setActiveFilters((prev) => ({ ...prev, ranking: label }))}
-                    />
-                  ))}
-                  <span className="mx-2 hidden h-7 w-px bg-slate-700 md:block" />
-                  {filters.horizon.map((label) => (
-                    <FilterChip
-                      key={label}
-                      label={label}
-                      active={activeFilters.horizon === label}
-                      onClick={() => setActiveFilters((prev) => ({ ...prev, horizon: label }))}
-                    />
-                  ))}
+                <div className="grid gap-3 xl:grid-cols-2">
+                  <FilterBar title="주식 필터">
+                    {filters.region.map((label) => (
+                      <FilterChip
+                        key={`stock-region-${label}`}
+                        label={label}
+                        active={stockFilters.region === label}
+                        onClick={() => setStockFilters((prev) => ({ ...prev, region: label }))}
+                      />
+                    ))}
+                    <span className="mx-1 hidden h-7 w-px bg-slate-700 md:block" />
+                    {filters.ranking.map((label) => (
+                      <FilterChip
+                        key={`stock-ranking-${label}`}
+                        label={label}
+                        active={stockFilters.ranking === label}
+                        onClick={() => setStockFilters((prev) => ({ ...prev, ranking: label }))}
+                      />
+                    ))}
+                  </FilterBar>
+
+                  <FilterBar title="코인 필터">
+                    {filters.ranking.map((label) => (
+                      <FilterChip
+                        key={`coin-ranking-${label}`}
+                        label={label}
+                        active={coinFilters.ranking === label}
+                        onClick={() => setCoinFilters((prev) => ({ ...prev, ranking: label }))}
+                      />
+                    ))}
+                  </FilterBar>
                 </div>
 
                 <div className="text-right text-xs text-slate-500">
                   {status === "loading"
                     ? "LOADING"
-                    : `${marketState.label}${snapshotMeta.as_of ? ` · 기준 ${formatSnapshotTime(snapshotMeta.as_of)}` : updatedAt ? ` · ${updatedAt}` : ""}`}
+                    : marketState.label}
                 </div>
               </div>
             </div>
           </section>
 
           <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-            {message && (
-              <div className="xl:col-span-2 rounded-lg border border-slate-700 bg-[#061321]/80 px-4 py-3 text-sm text-slate-300">
-                {message}
-              </div>
-            )}
-            <div className="hidden md:block">
-              <MarketTable rows={stocks} titleType="stock" ranking={activeFilters.ranking} />
+            <div className="xl:col-span-2 flex flex-col gap-3 rounded-lg border border-slate-700 bg-[#061321]/80 px-4 py-3 text-sm text-slate-300 sm:flex-row sm:items-center sm:justify-between">
+              <span className="min-w-0 break-words">{marketStatusText}</span>
+              <button
+                type="button"
+                onClick={refreshOverview}
+                disabled={status === "loading"}
+                className="h-8 shrink-0 rounded border border-ai-cyan/70 px-3 text-xs font-bold text-ai-cyan transition hover:bg-ai-cyan/10 disabled:cursor-not-allowed disabled:border-slate-700 disabled:text-slate-500"
+              >
+                새로고침
+              </button>
             </div>
-            <MobileMarketTable rows={stocks} titleType="stock" ranking={activeFilters.ranking} />
+            <div className="hidden md:block">
+              <MarketTable rows={stocks} titleType="stock" ranking={stockFilters.ranking} />
+            </div>
+            <MobileMarketTable rows={stocks} titleType="stock" ranking={stockFilters.ranking} />
 
             <div className="hidden md:block">
-              <MarketTable rows={coins} titleType="coin" />
+              <MarketTable rows={filteredCoins} titleType="coin" ranking={coinFilters.ranking} />
             </div>
-            <MobileMarketTable rows={coins} titleType="coin" />
+            <MobileMarketTable rows={filteredCoins} titleType="coin" ranking={coinFilters.ranking} />
           </section>
 
         </main>

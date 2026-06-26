@@ -16,7 +16,6 @@ HOME_STOCK_CLIENT_CACHE_LIMIT = int(os.getenv("HOME_STOCK_CLIENT_CACHE_LIMIT", "
 HOME_STOCK_SCAN_LIMIT = int(os.getenv("HOME_STOCK_SCAN_LIMIT", "120"))
 HOME_STOCK_SCAN_WORKERS = int(os.getenv("HOME_STOCK_SCAN_WORKERS", "4"))
 HOME_STOCK_CACHE_TTL_SECONDS = int(os.getenv("HOME_STOCK_CACHE_TTL_SECONDS", "300"))
-HOME_STOCK_STALE_SECONDS = int(os.getenv("HOME_STOCK_STALE_SECONDS", "120"))
 HOME_MARKET_RANK_LIMIT = int(os.getenv("HOME_MARKET_RANK_LIMIT", "50"))
 HOME_STOCK_PRIORITY_SYMBOLS = [
     symbol.strip().upper()
@@ -146,7 +145,7 @@ def build_snapshot_meta(rows: list[dict]) -> dict:
         "source": "KIS_DB_SNAPSHOT",
         "as_of": latest.isoformat() if latest else None,
         "age_seconds": int(age_seconds) if age_seconds is not None else None,
-        "stale": bool(age_seconds is None or age_seconds > HOME_STOCK_STALE_SECONDS),
+        "stale": False,
         "market_open": open_market,
         "refresh_interval_seconds": 60 if open_market else 600,
     }
@@ -368,7 +367,7 @@ def fetch_top_turnover_stock_rows(
     )
     kis = get_kis_env_credentials()
     meta = build_snapshot_meta(rows)
-    should_refresh = not rows or meta.get("stale")
+    should_refresh = not rows
     if should_refresh and kis["appkey"] and kis["appsecret"]:
         client = KISClient(
             appkey=kis["appkey"],

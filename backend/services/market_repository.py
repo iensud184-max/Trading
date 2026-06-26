@@ -59,13 +59,18 @@ class MarketRepository:
         )
         response.raise_for_status()
 
-    def list_turnover_rankings(self, market_segment: str = "ALL", limit: int = 50) -> list[dict[str, Any]]:
+    def list_turnover_rankings(
+        self,
+        market_segment: str = "ALL",
+        limit: int = 50,
+        order_by: str = "trading_value.desc,updated_at.desc",
+    ) -> list[dict[str, Any]]:
         if not self.is_configured:
             return []
 
         params = {
             "select": "symbol,name,market_segment,current_price,change_rate,trading_volume,trading_value,as_of",
-            "order": "trading_value.desc,updated_at.desc",
+            "order": order_by,
             "limit": str(limit),
         }
         if market_segment and market_segment.upper() != "ALL":

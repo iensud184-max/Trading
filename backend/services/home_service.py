@@ -12,10 +12,12 @@ from backend.services.toss_client import TossClient
 
 COINONE_HOME_LIMIT = int(os.getenv("COINONE_HOME_LIMIT", "10"))
 HOME_STOCK_LIMIT = int(os.getenv("HOME_STOCK_LIMIT", "10"))
+HOME_STOCK_CLIENT_CACHE_LIMIT = int(os.getenv("HOME_STOCK_CLIENT_CACHE_LIMIT", "200"))
 HOME_STOCK_SCAN_LIMIT = int(os.getenv("HOME_STOCK_SCAN_LIMIT", "120"))
 HOME_STOCK_SCAN_WORKERS = int(os.getenv("HOME_STOCK_SCAN_WORKERS", "4"))
 HOME_STOCK_CACHE_TTL_SECONDS = int(os.getenv("HOME_STOCK_CACHE_TTL_SECONDS", "300"))
 HOME_STOCK_STALE_SECONDS = int(os.getenv("HOME_STOCK_STALE_SECONDS", "120"))
+HOME_MARKET_RANK_LIMIT = int(os.getenv("HOME_MARKET_RANK_LIMIT", "50"))
 HOME_STOCK_PRIORITY_SYMBOLS = [
     symbol.strip().upper()
     for symbol in os.getenv(
@@ -49,9 +51,9 @@ COIN_DISPLAY_NAMES = {
 
 def get_kis_env_credentials() -> dict:
     return {
-        "appkey": os.getenv("KIS_APPKEY") or os.getenv("APP_Key") or "",
-        "appsecret": os.getenv("KIS_APPSECRET") or os.getenv("APP_Secret") or "",
-        "cano": os.getenv("KIS_CANO") or os.getenv("CANO") or "",
+        "appkey": os.getenv("KIS_APPKEY", ""),
+        "appsecret": os.getenv("KIS_APPSECRET", ""),
+        "cano": os.getenv("KIS_CANO", ""),
         "acnt_prdt_cd": os.getenv("KIS_ACNT_PRDT_CD") or "01",
         "env": os.getenv("KIS_ENV", "MOCK").upper(),
     }
@@ -239,6 +241,63 @@ def dedupe_market_rows(rows: list[dict]) -> list[dict]:
     return deduped
 
 
+def get_stock_rank_order(ranking: str | None) -> str:
+    if ranking == "거래량":
+        return "trading_volume.desc,updated_at.desc"
+    if ranking == "상승률":
+        return "change_rate.desc,trading_value.desc,updated_at.desc"
+    if ranking == "하락률":
+        return "change_rate.asc,trading_value.desc,updated_at.desc"
+    return "trading_value.desc,updated_at.desc"
+
+
+def build_home_rank_candidate_rows(
+    repository: MarketRepository,
+    client: KISClient,
+    lookup_limit: int,
+) -> list[dict]:
+    rank_limit = max(HOME_MARKET_RANK_LIMIT, lookup_limit)
+    try:
+        rank_rows = client.get_market_rank_candidates(limit=rank_limit)
+    except Exception:
+        rank_rows = []
+
+    rank_symbols = {
+        str(row.get("symbol") or "").strip().upper()
+        for row in rank_rows
+        if row.get("symbol")
+    }
+    master_rows = repository.list_symbols(HOME_STOCK_PRIORITY_SYMBOLS) if repository.is_configured else []
+    master_by_symbol = {
+        str(row.get("symbol") or "").strip().upper(): row
+        for row in master_rows
+    }
+    priority_rows = [
+        {
+            "symbol": symbol,
+            "name": (
+                clean_stock_name(master_by_symbol.get(symbol, {}).get("name"))
+                or SYMBOL_METADATA.get(symbol, {}).get("display_name")
+                or symbol
+            ),
+            "market_segment": master_by_symbol.get(symbol, {}).get("market_segment") or "KOSPI",
+            "market_country": "KR",
+        }
+        for symbol in HOME_STOCK_PRIORITY_SYMBOLS
+        if symbol not in rank_symbols
+    ]
+    stock_rows = [
+        row for row in dedupe_market_rows(priority_rows)
+        if is_domestic_common_stock_row(row)
+    ]
+    snapshot_rows, _ = build_turnover_snapshot_rows(
+        stock_rows,
+        client,
+        max_workers=HOME_STOCK_SCAN_WORKERS,
+    )
+    return dedupe_market_rows(rank_rows + snapshot_rows)
+
+
 def apply_stock_filters(rows: list[dict], filters: dict, limit: int = HOME_STOCK_LIMIT) -> list[dict]:
     ranking = filters.get("ranking") or filters.get("metric") or "거래대금"
     filtered = list(rows or [])
@@ -278,10 +337,12 @@ def fetch_top_turnover_stock_rows(
         return cached_rows[:limit]
 
     repository = MarketRepository()
-    lookup_limit = max(limit * 5, 50)
+    lookup_limit = max(limit * 20, HOME_MARKET_RANK_LIMIT * 4, 200)
+    order_by = get_stock_rank_order(ranking)
     rows = repository.list_turnover_rankings(
         market_segment=market_segment if market_segment != "US" else "ALL",
         limit=lookup_limit,
+        order_by=order_by,
     )
     kis = get_kis_env_credentials()
     meta = build_snapshot_meta(rows)
@@ -294,52 +355,14 @@ def fetch_top_turnover_stock_rows(
             acnt_prdt_cd=kis["acnt_prdt_cd"],
             env=kis["env"],
         )
-        rank_rows = []
-        try:
-            rank_rows = client.get_turnover_rankings(limit=80)
-        except Exception:
-            rank_rows = []
-
-        rank_symbols = {
-            str(row.get("symbol") or "").strip().upper()
-            for row in rank_rows
-            if row.get("symbol")
-        }
-        master_rows = repository.list_symbols(HOME_STOCK_PRIORITY_SYMBOLS) if repository.is_configured else []
-        master_by_symbol = {
-            str(row.get("symbol") or "").strip().upper(): row
-            for row in master_rows
-        }
-        priority_rows = [
-            {
-                "symbol": symbol,
-                "name": (
-                    clean_stock_name(master_by_symbol.get(symbol, {}).get("name"))
-                    or SYMBOL_METADATA.get(symbol, {}).get("display_name")
-                    or symbol
-                ),
-                "market_segment": master_by_symbol.get(symbol, {}).get("market_segment") or "KOSPI",
-                "market_country": "KR",
-            }
-            for symbol in HOME_STOCK_PRIORITY_SYMBOLS
-            if symbol not in rank_symbols
-        ]
-        stock_rows = [
-            row for row in dedupe_market_rows(priority_rows)
-            if is_domestic_common_stock_row(row)
-        ]
-        snapshot_rows, _ = build_turnover_snapshot_rows(
-            stock_rows,
-            client,
-            max_workers=HOME_STOCK_SCAN_WORKERS,
-        )
-        rows = dedupe_market_rows(rank_rows + snapshot_rows)[:lookup_limit]
+        rows = build_home_rank_candidate_rows(repository, client, lookup_limit)
         if rows and repository.is_configured:
             repository.upsert_turnover_latest(rows)
         if repository.is_configured:
             stored_rows = repository.list_turnover_rankings(
                 market_segment=market_segment if market_segment != "US" else "ALL",
                 limit=lookup_limit,
+                order_by=order_by,
             )
             if stored_rows:
                 rows = stored_rows
@@ -499,6 +522,7 @@ def build_home_overview(data: dict) -> dict:
         filters = data.get("filters") or {}
         ranking = filters.get("ranking") or filters.get("metric") or "거래대금"
         stock_rows = data.get("stock_rows") or fetch_top_turnover_stock_rows(
+            limit=HOME_STOCK_CLIENT_CACHE_LIMIT,
             region=filters.get("region", "전체"),
             ranking=ranking,
             horizon=filters.get("horizon", "실시간"),

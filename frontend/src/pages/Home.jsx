@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Header from "../components/Header.jsx";
 
 const filters = {
@@ -230,8 +230,8 @@ function MobileMarketTable({ rows, titleType = "stock", ranking = "거래대금"
   );
 }
 
-export default function Home() {
-  const [stocks, setStocks] = useState([]);
+export default function Home({ isLoggedIn, userEmail, handleLogout }) {
+  const [stockCandidates, setStockCandidates] = useState([]);
   const [coins, setCoins] = useState([]);
   const [status, setStatus] = useState("loading");
   const [message, setMessage] = useState("");
@@ -243,8 +243,12 @@ export default function Home() {
     ranking: "거래대금",
     horizon: "실시간",
   });
+  const stocks = useMemo(
+    () => applyClientStockFilters(stockCandidates, activeFilters).slice(0, 10),
+    [stockCandidates, activeFilters.ranking],
+  );
 
-  const loadOverview = async () => {
+  const loadOverview = async (requestFilters = activeFilters) => {
       try {
         setStatus("loading");
         const currentMarketState = getKoreanMarketState();
@@ -252,7 +256,7 @@ export default function Home() {
         const response = await fetch("http://localhost:5050/api/home/market", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filters: activeFilters }),
+          body: JSON.stringify({ filters: requestFilters }),
         });
 
         const data = await response.json();
@@ -262,10 +266,10 @@ export default function Home() {
 
         const stockRows = Array.isArray(data.data?.stocks) ? data.data.stocks : [];
         const marketSnapshot = data.data?.market_snapshot || {};
-        setStocks(applyClientStockFilters(stockRows, activeFilters));
+        setStockCandidates(stockRows);
         setCoins(Array.isArray(data.data?.coins) ? data.data.coins : []);
         setSnapshotMeta(marketSnapshot);
-        const unsupportedHorizon = activeFilters.horizon !== "실시간"
+        const unsupportedHorizon = requestFilters.horizon !== "실시간"
           ? "기간별 랭킹은 아직 지원하지 않아 실시간 기준으로 표시됩니다."
           : "";
         const staleMessage = marketSnapshot.stale && stockRows.length > 0
@@ -275,7 +279,7 @@ export default function Home() {
         setUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
         setStatus("ready");
       } catch (error) {
-        setStocks([]);
+        setStockCandidates([]);
         setCoins([]);
         setSnapshotMeta({});
         setMessage(error.message || "홈 데이터를 불러오지 못했습니다.");
@@ -286,6 +290,11 @@ export default function Home() {
   useEffect(() => {
     let timeoutId;
     let cancelled = false;
+    const requestFilters = {
+      region: activeFilters.region,
+      ranking: "거래대금",
+      horizon: activeFilters.horizon,
+    };
 
     const scheduleNextLoad = () => {
       const currentMarketState = getKoreanMarketState();
@@ -293,12 +302,12 @@ export default function Home() {
       const delay = currentMarketState.isOpen ? 60_000 : 600_000;
       timeoutId = window.setTimeout(async () => {
         if (cancelled) return;
-        await loadOverview();
+        await loadOverview(requestFilters);
         if (!cancelled) scheduleNextLoad();
       }, delay);
     };
 
-    loadOverview().then(() => {
+    loadOverview(requestFilters).then(() => {
       if (!cancelled) scheduleNextLoad();
     });
 
@@ -306,12 +315,12 @@ export default function Home() {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [activeFilters]);
+  }, [activeFilters.region, activeFilters.horizon]);
 
   return (
     <div className="min-h-screen bg-obsidian-bg text-[#e2e2ec] font-inter">
       <div className="px-4 py-4 sm:px-6 sm:py-6">
-        <Header isLoggedIn={false} />
+        <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} />
 
         <main className="mx-auto flex w-full max-w-7xl flex-col gap-6">
           <section className="ai-glass rounded-lg p-4 sm:p-6">

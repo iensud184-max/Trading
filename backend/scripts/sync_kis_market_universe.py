@@ -23,7 +23,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     load_dotenv(PROJECT_ROOT / "backend" / ".env")
-    load_dotenv(PROJECT_ROOT / ".env")
 
     args = build_parser().parse_args()
     service = KISMarketUniverseService()

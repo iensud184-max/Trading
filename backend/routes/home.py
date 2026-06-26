@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from flask import Blueprint, request, jsonify, current_app
-from backend.services.home_service import build_home_overview, fetch_coinone_overview, split_kis_holdings, to_float
+from backend.services.home_service import build_home_overview, fetch_coinone_overview, get_stock_rank_order, split_kis_holdings, to_float
 from backend.services.kis_client import KISClient
 from backend.services.toss_client import TossClient
 from backend.services.coinone_client import CoinoneClient
@@ -186,6 +186,7 @@ def sync_kis_market_universe():
 def get_market_rankings():
     """유니버스의 거래대금 순위를 조회합니다."""
     market_segment = request.args.get("market_segment", "ALL")
+    ranking = request.args.get("ranking", "거래대금")
     limit = int(request.args.get("limit", 50))
 
     kis_market_universe_service = current_app.kis_market_universe_service
@@ -193,6 +194,7 @@ def get_market_rankings():
         rankings = kis_market_universe_service.repository.list_turnover_rankings(
             market_segment=market_segment,
             limit=limit,
+            order_by=get_stock_rank_order(ranking),
         )
         universe_count = kis_market_universe_service.repository.count_universe(market_segment=market_segment)
         return jsonify({
@@ -202,6 +204,7 @@ def get_market_rankings():
                 "totalCount": len(rankings),
                 "universeCount": universe_count,
                 "marketSegment": market_segment.upper(),
+                "ranking": ranking,
                 "limit": limit,
             }
         })

@@ -5,8 +5,13 @@ from flask import Flask
 from flask_cors import CORS
 from dotenv import load_dotenv
 
+# backend/.env를 백엔드 표준 환경 파일로 사용합니다.
+BACKEND_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BACKEND_DIR.parent
+load_dotenv(BACKEND_DIR / ".env")
+
 # backend 디렉토리가 파이썬 경로에 포함되도록 설정
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(str(PROJECT_ROOT))
 
 from backend.utils.crypto_helper import CryptoHelper
 from backend.services.news_repository import NewsRepository
@@ -21,9 +26,6 @@ from backend.routes.keys import keys_bp
 from backend.routes.ml import ml_bp
 from backend.routes.news import news_bp
 from backend.routes.trade import trade_bp
-
-# 환경 변수 로드
-load_dotenv()
 
 app = Flask(__name__)
 # 프론트엔드 연동을 위해 CORS 활성화 및 Authorization 헤더 허용
@@ -40,6 +42,10 @@ KIS_APPSECRET = os.getenv("KIS_APPSECRET", "")
 KIS_CANO = os.getenv("KIS_CANO", "")
 KIS_ACNT_PRDT_CD = os.getenv("KIS_ACNT_PRDT_CD", "01")
 KIS_ENV = os.getenv("KIS_ENV", "MOCK")
+COINONE_ACCESS_TOKEN = os.getenv("COINONE_ACCESS_TOKEN", "")
+COINONE_SECRET_KEY = os.getenv("COINONE_SECRET_KEY", "")
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
+BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "")
 
 NEWS_INGEST_ENABLED = os.getenv("NEWS_INGEST_ENABLED", "false").lower() == "true"
 NEWS_INGEST_INTERVAL_SECONDS = int(os.getenv("NEWS_INGEST_INTERVAL_SECONDS", "600"))
@@ -56,7 +62,11 @@ app.config["KIS_APPSECRET"] = KIS_APPSECRET
 app.config["KIS_CANO"] = KIS_CANO
 app.config["KIS_ACNT_PRDT_CD"] = KIS_ACNT_PRDT_CD
 app.config["KIS_ENV"] = KIS_ENV
-app.config["PROJECT_ROOT_PATH"] = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+app.config["COINONE_ACCESS_TOKEN"] = COINONE_ACCESS_TOKEN
+app.config["COINONE_SECRET_KEY"] = COINONE_SECRET_KEY
+app.config["BINANCE_API_KEY"] = BINANCE_API_KEY
+app.config["BINANCE_SECRET_KEY"] = BINANCE_SECRET_KEY
+app.config["PROJECT_ROOT_PATH"] = PROJECT_ROOT
 
 # 전역 공유 서비스 인스턴스 초기화 및 App 바인딩 (의존성 주입)
 crypto = CryptoHelper(ENCRYPTION_KEY)

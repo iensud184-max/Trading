@@ -299,20 +299,24 @@ class KISMarketUniverseService:
         quote_limit: int = 300,
         max_workers: int = 2,
     ) -> dict[str, Any]:
-        master_rows = self.repository.list_universe(
-            market_segment=market_segment,
-            limit=quote_limit,
-        )
-        common_stock_rows = [row for row in master_rows if is_rankable_market_row(row)]
-        quote_rows, quote_errors = build_turnover_snapshot_rows(
-            common_stock_rows,
-            kis_client,
-            max_workers=max_workers,
-        )
+        quote_rows = kis_client.get_market_rank_candidates(limit=quote_limit)
+        quote_errors: list[dict[str, Any]] = []
+
+        if not quote_rows:
+            master_rows = self.repository.list_universe(
+                market_segment=market_segment,
+                limit=quote_limit,
+            )
+            common_stock_rows = [row for row in master_rows if is_rankable_market_row(row)]
+            quote_rows, quote_errors = build_turnover_snapshot_rows(
+                common_stock_rows,
+                kis_client,
+                max_workers=max_workers,
+            )
         self.repository.upsert_turnover_latest(quote_rows)
 
         return {
-            "target_count": len(common_stock_rows),
+            "target_count": quote_limit,
             "quote_count": len(quote_rows),
             "quote_error_count": len(quote_errors),
             "quote_errors": quote_errors[:20],

@@ -207,6 +207,153 @@ class KISClient(ExchangeClient):
         rankings.sort(key=lambda row: row["trading_value"], reverse=True)
         return rankings[:limit]
 
+    def _to_float(self, value, default: float = 0.0) -> float:
+        try:
+            if value is None or value == "":
+                return default
+            return float(str(value).replace(",", "").strip())
+        except (TypeError, ValueError):
+            return default
+
+    def _normalize_domestic_rank_item(self, item: dict, source: str) -> dict | None:
+        symbol = str(item.get("stck_shrn_iscd") or item.get("mksc_shrn_iscd") or "").strip().upper()
+        if not symbol:
+            return None
+
+        current_price = self._to_float(item.get("stck_prpr"))
+        change_rate = self._to_float(item.get("prdy_ctrt"))
+        trading_volume = self._to_float(
+            item.get("acml_vol")
+            or item.get("acc_trdvol")
+            or item.get("cntg_vol")
+        )
+        trading_value = self._to_float(
+            item.get("acml_tr_pbmn")
+            or item.get("acc_trdval")
+            or item.get("acc_trdprc")
+        )
+        if not trading_value and current_price and trading_volume:
+            trading_value = current_price * trading_volume
+
+        return {
+            "symbol": symbol,
+            "name": str(item.get("hts_kor_isnm") or item.get("data_rank_name") or symbol).strip(),
+            "market_segment": "OTHER" if not symbol.isdigit() else "KOSPI",
+            "market_country": "KR",
+            "current_price": current_price,
+            "change_rate": change_rate,
+            "trading_volume": trading_volume,
+            "trading_value": trading_value,
+            "as_of": datetime.utcnow().isoformat() + "Z",
+            "raw": {**item, "_rank_source": source},
+        }
+
+    def _get_domestic_rankings(
+        self,
+        endpoint: str,
+        tr_id: str,
+        params: dict,
+        source: str,
+        limit: int,
+    ) -> list[dict]:
+        token = self._get_cached_token()
+        headers = {
+            "content-type": "application/json; charset=utf-8",
+            "authorization": f"Bearer {token}",
+            "appkey": self.appkey,
+            "appsecret": self.appsecret,
+            "tr_id": tr_id,
+        }
+        res = requests.get(f"{self.base_url}{endpoint}", headers=headers, params=params, timeout=15)
+        if res.status_code != 200:
+            raise Exception(f"KIS ranking request failed: {res.text}")
+
+        data = res.json()
+        if data.get("rt_cd") != "0":
+            raise Exception(f"KIS ranking error: {data.get('msg1')}")
+
+        rankings = []
+        for item in data.get("output", []) or []:
+            row = self._normalize_domestic_rank_item(item, source)
+            if row:
+                rankings.append(row)
+        return rankings[:limit]
+
+    def get_fluctuation_rankings(self, direction: str = "up", limit: int = 50) -> list[dict]:
+        """
+        KIS 국내주식 등락률 순위 API를 호출합니다.
+        direction='up'은 상승률 상위, direction='down'은 하락률 하위를 반환합니다.
+        """
+        sort_code = "0" if direction == "up" else "1"
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_COND_SCR_DIV_CODE": "20170",
+            "FID_INPUT_ISCD": "0000",
+            "FID_RANK_SORT_CLS_CODE": sort_code,
+            "FID_INPUT_CNT_1": "0",
+            "FID_PRC_CLS_CODE": "1",
+            "FID_INPUT_PRICE_1": "",
+            "FID_INPUT_PRICE_2": "",
+            "FID_VOL_CNT": "",
+            "FID_TRGT_CLS_CODE": "0",
+            "FID_TRGT_EXLS_CLS_CODE": "0",
+            "FID_DIV_CLS_CODE": "0",
+            "FID_RSFL_RATE1": "",
+            "FID_RSFL_RATE2": "",
+        }
+        rankings = self._get_domestic_rankings(
+            endpoint="/uapi/domestic-stock/v1/ranking/fluctuation",
+            tr_id="FHPST01700000",
+            params=params,
+            source=f"KIS_FLUCTUATION_{direction.upper()}",
+            limit=limit,
+        )
+        rankings.sort(key=lambda row: row["change_rate"], reverse=direction == "up")
+        return rankings[:limit]
+
+    def get_market_rank_candidates(self, limit: int = 50) -> list[dict]:
+        """
+        거래대금/거래량 후보와 상승률/하락률 후보를 합쳐 DB 캐시 업서트용 후보군을 만듭니다.
+        같은 종목은 가장 정보가 많은 최신 행 하나로 합칩니다.
+        """
+        collected: list[dict] = []
+        errors: list[str] = []
+        for fetcher in (
+            lambda: self.get_turnover_rankings(limit=limit),
+            lambda: self.get_fluctuation_rankings(direction="up", limit=limit),
+            lambda: self.get_fluctuation_rankings(direction="down", limit=limit),
+        ):
+            try:
+                collected.extend(fetcher())
+            except Exception as exc:
+                errors.append(str(exc))
+
+        by_symbol: dict[str, dict] = {}
+        for row in collected:
+            symbol = str(row.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+            previous = by_symbol.get(symbol)
+            if not previous:
+                by_symbol[symbol] = row
+                continue
+            merged = {**previous, **row}
+            merged["trading_value"] = max(
+                self._to_float(previous.get("trading_value")),
+                self._to_float(row.get("trading_value")),
+            )
+            merged["trading_volume"] = max(
+                self._to_float(previous.get("trading_volume")),
+                self._to_float(row.get("trading_volume")),
+            )
+            by_symbol[symbol] = merged
+
+        rows = list(by_symbol.values())
+        rows.sort(key=lambda row: row.get("trading_value", 0), reverse=True)
+        if not rows and errors:
+            raise Exception("; ".join(errors))
+        return rows
+
     def get_balance(self) -> dict:
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
         token = self._get_cached_token()

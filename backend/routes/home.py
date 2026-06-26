@@ -1,8 +1,9 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from flask import Blueprint, request, jsonify, current_app
-from backend.services.home_service import build_home_overview, fetch_coinone_overview, split_kis_holdings, to_float
+from backend.services.home_service import build_home_overview, fetch_coinone_overview, get_stock_rank_order, split_kis_holdings, to_float
+from backend.services.market_index_service import collect_market_index_rows, serialize_market_index_rows
 from backend.services.kis_client import KISClient
 from backend.services.toss_client import TossClient
 from backend.services.coinone_client import CoinoneClient
@@ -14,6 +15,71 @@ home_bp = Blueprint("home", __name__)
 
 KIS_MARKET_MASTER_FILE_PATH = os.getenv("KIS_MARKET_MASTER_FILE_PATH", "")
 MARKET_SYNC_ADMIN_TOKEN = os.getenv("MARKET_SYNC_ADMIN_TOKEN", "")
+
+
+def parse_date_param(value: str | None, fallback: datetime) -> str:
+    if not value:
+        return fallback.date().isoformat()
+    try:
+        return datetime.fromisoformat(value[:10]).date().isoformat()
+    except ValueError:
+        return fallback.date().isoformat()
+
+
+def calculate_portfolio_profit_rate(balance: dict) -> float:
+    holdings = balance.get("holdings") or []
+    total_profit = 0.0
+    invested_amount = 0.0
+
+    for item in holdings:
+        qty = to_float(item.get("qty"))
+        avg_price = to_float(item.get("avg_price"))
+        current_price = to_float(item.get("current_price"))
+        profit = to_float(item.get("profit"))
+        total_profit += profit
+        invested_amount += avg_price * qty if avg_price > 0 else max(0.0, current_price * qty - profit)
+
+    if invested_amount <= 0:
+        return 0.0
+    return (total_profit / invested_amount) * 100
+
+
+def save_portfolio_snapshot(auth_header: str, user_id: str, balance: dict):
+    snapshot_date = datetime.utcnow().date().isoformat()
+    payload = {
+        "user_id": user_id,
+        "snapshot_date": snapshot_date,
+        "total_evaluation": to_float(balance.get("total_evaluation")),
+        "available_cash": to_float(balance.get("available_cash")),
+        "portfolio_profit_rate": calculate_portfolio_profit_rate(balance),
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+
+    existing = query_supabase(
+        auth_header,
+        "portfolio_snapshots",
+        "GET",
+        params={
+            "user_id": f"eq.{user_id}",
+            "snapshot_date": f"eq.{snapshot_date}",
+            "select": "id",
+        },
+    )
+
+    if existing:
+        query_supabase(
+            auth_header,
+            f"portfolio_snapshots?id=eq.{existing[0]['id']}",
+            "PATCH",
+            json_data=payload,
+        )
+    else:
+        query_supabase(
+            auth_header,
+            "portfolio_snapshots",
+            "POST",
+            json_data=payload,
+        )
 
 
 def require_market_sync_admin():
@@ -31,6 +97,10 @@ def get_home_market():
     try:
         data = request.json or {}
         overview = build_home_overview(data)
+        overview["route_meta"] = {
+            "auth_mode": "PUBLIC_MARKET_OVERVIEW",
+            "user_api_keys_used": False,
+        }
         return jsonify({
             "success": True,
             "data": overview
@@ -40,6 +110,61 @@ def get_home_market():
             "success": False,
             "message": f"홈 시장 데이터 조회 실패: {str(error)}",
         }), 500
+
+
+@home_bp.route("/api/dashboard/asset-trend", methods=["GET"])
+def get_dashboard_asset_trend():
+    """로그인 사용자의 날짜별 총 자산 스냅샷을 조회합니다."""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"success": False, "message": "인증 헤더가 필요합니다."}), 401
+
+    now = datetime.utcnow()
+    start_date = parse_date_param(request.args.get("start"), now - timedelta(days=30))
+    end_date = parse_date_param(request.args.get("end"), now)
+
+    try:
+        user_id, _ = get_user_id_from_header(auth_header)
+    except Exception as error:
+        return jsonify({"success": False, "message": f"사용자 인증 확인 실패: {str(error)}"}), 401
+
+    try:
+        rows = query_supabase(
+            auth_header,
+            "portfolio_snapshots",
+            "GET",
+            params={
+                "user_id": f"eq.{user_id}",
+                "snapshot_date": f"gte.{start_date}",
+                "select": "snapshot_date,total_evaluation,available_cash,portfolio_profit_rate",
+                "order": "snapshot_date.asc",
+            },
+        )
+        rows = [
+            row
+            for row in (rows or [])
+            if str(row.get("snapshot_date", ""))[:10] <= end_date
+        ]
+        return jsonify({
+            "success": True,
+            "data": {
+                "items": rows,
+                "start": start_date,
+                "end": end_date,
+                "source": "portfolio_snapshots",
+            },
+        })
+    except Exception as error:
+        return jsonify({
+            "success": True,
+            "data": {
+                "items": [],
+                "start": start_date,
+                "end": end_date,
+                "source": "empty",
+                "message": f"자산 스냅샷 데이터가 아직 준비되지 않았습니다: {str(error)}",
+            },
+        })
 
 @home_bp.route("/api/home/overview", methods=["POST"])
 def get_home_overview():
@@ -186,6 +311,7 @@ def sync_kis_market_universe():
 def get_market_rankings():
     """유니버스의 거래대금 순위를 조회합니다."""
     market_segment = request.args.get("market_segment", "ALL")
+    ranking = request.args.get("ranking", "거래대금")
     limit = int(request.args.get("limit", 50))
 
     kis_market_universe_service = current_app.kis_market_universe_service
@@ -193,6 +319,7 @@ def get_market_rankings():
         rankings = kis_market_universe_service.repository.list_turnover_rankings(
             market_segment=market_segment,
             limit=limit,
+            order_by=get_stock_rank_order(ranking),
         )
         universe_count = kis_market_universe_service.repository.count_universe(market_segment=market_segment)
         return jsonify({
@@ -202,6 +329,7 @@ def get_market_rankings():
                 "totalCount": len(rankings),
                 "universeCount": universe_count,
                 "marketSegment": market_segment.upper(),
+                "ranking": ranking,
                 "limit": limit,
             }
         })
@@ -209,6 +337,66 @@ def get_market_rankings():
         return jsonify({
             "success": False,
             "message": f"거래대금 순위 조회 실패: {str(error)}",
+        }), 500
+
+@home_bp.route("/api/market/indices", methods=["GET"])
+def get_market_indices():
+    """전역 하단 지수 바용 최신 지수 스냅샷을 반환합니다."""
+    repository = getattr(current_app, "market_index_repository", None)
+    if repository is None or not repository.is_configured:
+        return jsonify({
+            "success": False,
+            "message": "시장 지수 저장소가 아직 설정되지 않았습니다.",
+        }), 500
+
+    try:
+        rows = repository.list_latest()
+        if not rows:
+            live_rows, live_errors = collect_market_index_rows()
+            if repository.is_configured and live_rows:
+                try:
+                    repository.upsert_latest(live_rows)
+                except Exception:
+                    pass
+            if not live_rows:
+                return jsonify({
+                    "success": False,
+                    "message": "저장된 지수 데이터가 없고 실시간 수집도 실패했습니다.",
+                    "errors": live_errors,
+                }), 503
+
+            payload = serialize_market_index_rows(live_rows)
+            payload["source"] = "live.collector"
+            payload["bootstrap"] = True
+            payload["errors"] = live_errors
+            return jsonify({
+                "success": True,
+                "data": payload,
+            })
+
+        return jsonify({
+            "success": True,
+            "data": serialize_market_index_rows(rows),
+        })
+    except Exception as error:
+        live_rows, live_errors = collect_market_index_rows()
+        if live_rows:
+            if repository.is_configured:
+                try:
+                    repository.upsert_latest(live_rows)
+                except Exception:
+                    pass
+            payload = serialize_market_index_rows(live_rows)
+            payload["source"] = "live.collector"
+            payload["bootstrap"] = True
+            payload["errors"] = [str(error), *[item["message"] for item in live_errors]]
+            return jsonify({
+                "success": True,
+                "data": payload,
+            })
+        return jsonify({
+            "success": False,
+            "message": f"지수 데이터 조회 실패: {str(error)}",
         }), 500
 
 @home_bp.route("/api/dashboard/balance", methods=["POST"])
@@ -273,10 +461,20 @@ def get_dashboard_balance():
             balance = client.get_balance()
         else:
             return jsonify({"success": False, "message": f"지원하지 않는 거래소: {exchange}"}), 400
-            
+        try:
+            save_portfolio_snapshot(auth_header, user_id, balance)
+        except Exception:
+            pass
+
         return jsonify({
             "success": True,
-            "data": balance
+            "data": balance,
+            "meta": {
+                "credential_source": "USER_API_KEYS_DB",
+                "exchange": exchange,
+                "broker_env": broker_env,
+                "user_id": user_id,
+            }
         })
     except Exception as e:
         return jsonify({

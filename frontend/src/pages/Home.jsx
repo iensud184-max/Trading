@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import Header from "../components/Header.jsx";
 
 const filters = {
@@ -158,29 +159,42 @@ function MarketTable({ rows, titleType = "stock", ranking = "거래대금" }) {
           <div className="px-4 py-10 text-center text-sm text-slate-500">
             표시할 데이터가 없습니다.
           </div>
-        ) : rows.map((row) => (
-          <div
-            key={`${row.rank}-${row.name}`}
-            className="grid min-h-[58px] grid-cols-[34px_42px_minmax(130px,1.7fr)_minmax(92px,1fr)_minmax(78px,0.8fr)_minmax(92px,1fr)] items-center gap-3 px-4 py-2 text-[14px] hover:bg-white/[0.04]"
-          >
-            <button type="button" className="text-[24px] leading-none text-slate-400 hover:text-ai-cyan" aria-label="관심 종목">
-              {isStock ? "♡" : "☆"}
-            </button>
-            <div className="text-center text-[16px] text-slate-100 tabular-nums">{row.rank}</div>
-            <div className="flex min-w-0 items-center gap-3">
-              <RankIcon label={row.symbol || row.code || row.name} />
-              <div className="min-w-0">
-                <div className="truncate text-[15px] font-semibold text-slate-100">{row.name}</div>
-                <div className="mt-0.5 truncate text-[12px] text-slate-500">{row.code || row.symbol}</div>
+        ) : rows.map((row) => {
+          const symbol = row.code || row.symbol;
+          const assetPath = `/asset/${isStock ? "STOCK" : "CRYPTO"}/${symbol}`;
+          return (
+            <Link
+              key={`${row.rank}-${row.name}`}
+              to={assetPath}
+              className="grid min-h-[58px] grid-cols-[34px_42px_minmax(130px,1.7fr)_minmax(92px,1fr)_minmax(78px,0.8fr)_minmax(92px,1fr)] items-center gap-3 px-4 py-2 text-[14px] hover:bg-white/[0.04] active:bg-white/[0.08] cursor-pointer transition-colors text-inherit no-underline block"
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                className="text-[24px] leading-none text-slate-400 hover:text-ai-cyan"
+                aria-label="관심 종목"
+              >
+                {isStock ? "♡" : "☆"}
+              </button>
+              <div className="text-center text-[16px] text-slate-100 tabular-nums">{row.rank}</div>
+              <div className="flex min-w-0 items-center gap-3">
+                <RankIcon label={row.symbol || row.code || row.name} />
+                <div className="min-w-0">
+                  <div className="truncate text-[15px] font-semibold text-slate-100">{row.name}</div>
+                  <div className="mt-0.5 truncate text-[12px] text-slate-500">{row.code || row.symbol}</div>
+                </div>
               </div>
-            </div>
-            <div className="text-right text-[15px] tabular-nums text-slate-100">{formatPrice(row)}</div>
-            <div className={`text-right text-[15px] font-medium tabular-nums ${changeClass(formatChange(row))}`}>
-              {formatChange(row)}
-            </div>
-            <div className="text-right text-[15px] tabular-nums text-slate-200">{formatValue(row, valueKey)}</div>
-          </div>
-        ))}
+              <div className="text-right text-[15px] tabular-nums text-slate-100">{formatPrice(row)}</div>
+              <div className={`text-right text-[15px] font-medium tabular-nums ${changeClass(formatChange(row))}`}>
+                {formatChange(row)}
+              </div>
+              <div className="text-right text-[15px] tabular-nums text-slate-200">{formatValue(row, valueKey)}</div>
+            </Link>
+          );
+        })}
       </div>
       <div className="border-t border-slate-700/80 px-4 py-3 text-center text-sm font-medium text-slate-200 hover:bg-white/[0.03]">
         더보기 <span className="ml-3 text-xl text-slate-400">›</span>
@@ -197,41 +211,57 @@ function MobileMarketTable({ rows, titleType = "stock", ranking = "거래대금"
     <div className="divide-y divide-slate-700/70 overflow-hidden rounded-lg border border-slate-700 bg-[#061321]/90 md:hidden">
       {rows.length === 0 ? (
         <div className="px-4 py-8 text-center text-sm text-slate-500">표시할 데이터가 없습니다.</div>
-      ) : rows.map((row) => (
-        <div key={`${titleType}-${row.rank}-${row.name}`} className="p-4">
-          <div className="flex items-center gap-3">
-            <div className="w-6 text-center text-slate-300">{row.rank}</div>
-            <RankIcon label={row.symbol || row.code || row.name} />
-            <div className="min-w-0 flex-1">
-              <div className="truncate font-semibold text-slate-100">{row.name}</div>
-              <div className="mt-0.5 text-[11px] text-slate-500">{row.code || row.symbol}</div>
+      ) : rows.map((row) => {
+        const symbol = row.code || row.symbol;
+        const assetPath = `/asset/${titleType === "stock" ? "STOCK" : "CRYPTO"}/${symbol}`;
+        return (
+          <Link
+            key={`${titleType}-${row.rank}-${row.name}`}
+            to={assetPath}
+            className="p-4 block text-inherit no-underline hover:bg-white/[0.02] active:bg-white/[0.04] cursor-pointer transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-6 text-center text-slate-300">{row.rank}</div>
+              <RankIcon label={row.symbol || row.code || row.name} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-semibold text-slate-100">{row.name}</div>
+                <div className="mt-0.5 text-[11px] text-slate-500">{row.code || row.symbol}</div>
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                className="text-[22px] text-slate-400 hover:text-ai-cyan"
+                aria-label="관심 종목"
+              >
+                {titleType === "stock" ? "♡" : "☆"}
+              </button>
             </div>
-            <button type="button" className="text-[22px] text-slate-400" aria-label="관심 종목">
-              {titleType === "stock" ? "♡" : "☆"}
-            </button>
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-right text-[13px]">
-            <div>
-              <div className="text-[10px] text-slate-500">현재가</div>
-              <div className="mt-1 text-slate-100">{formatPrice(row)}</div>
+            <div className="mt-3 grid grid-cols-3 gap-2 text-right text-[13px]">
+              <div>
+                <div className="text-[10px] text-slate-500">현재가</div>
+                <div className="mt-1 text-slate-100">{formatPrice(row)}</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-slate-500">등락률</div>
+                <div className={`mt-1 ${changeClass(formatChange(row))}`}>{formatChange(row)}</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-slate-500">{valueLabel}</div>
+                <div className="mt-1 text-slate-200">{formatValue(row, valueKey)}</div>
+              </div>
             </div>
-            <div>
-              <div className="text-[10px] text-slate-500">등락률</div>
-              <div className={`mt-1 ${changeClass(formatChange(row))}`}>{formatChange(row)}</div>
-            </div>
-            <div>
-              <div className="text-[10px] text-slate-500">{valueLabel}</div>
-              <div className="mt-1 text-slate-200">{formatValue(row, valueKey)}</div>
-            </div>
-          </div>
-        </div>
-      ))}
+          </Link>
+        );
+      })}
     </div>
   );
 }
 
-export default function Home() {
-  const [stocks, setStocks] = useState([]);
+export default function Home({ isLoggedIn, userEmail, handleLogout }) {
+  const [stockCandidates, setStockCandidates] = useState([]);
   const [coins, setCoins] = useState([]);
   const [status, setStatus] = useState("loading");
   const [message, setMessage] = useState("");
@@ -243,8 +273,12 @@ export default function Home() {
     ranking: "거래대금",
     horizon: "실시간",
   });
+  const stocks = useMemo(
+    () => applyClientStockFilters(stockCandidates, activeFilters).slice(0, 10),
+    [stockCandidates, activeFilters.ranking],
+  );
 
-  const loadOverview = async () => {
+  const loadOverview = async (requestFilters = activeFilters) => {
       try {
         setStatus("loading");
         const currentMarketState = getKoreanMarketState();
@@ -252,7 +286,7 @@ export default function Home() {
         const response = await fetch("http://localhost:5050/api/home/market", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filters: activeFilters }),
+          body: JSON.stringify({ filters: requestFilters }),
         });
 
         const data = await response.json();
@@ -262,10 +296,10 @@ export default function Home() {
 
         const stockRows = Array.isArray(data.data?.stocks) ? data.data.stocks : [];
         const marketSnapshot = data.data?.market_snapshot || {};
-        setStocks(applyClientStockFilters(stockRows, activeFilters));
+        setStockCandidates(stockRows);
         setCoins(Array.isArray(data.data?.coins) ? data.data.coins : []);
         setSnapshotMeta(marketSnapshot);
-        const unsupportedHorizon = activeFilters.horizon !== "실시간"
+        const unsupportedHorizon = requestFilters.horizon !== "실시간"
           ? "기간별 랭킹은 아직 지원하지 않아 실시간 기준으로 표시됩니다."
           : "";
         const staleMessage = marketSnapshot.stale && stockRows.length > 0
@@ -275,7 +309,7 @@ export default function Home() {
         setUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
         setStatus("ready");
       } catch (error) {
-        setStocks([]);
+        setStockCandidates([]);
         setCoins([]);
         setSnapshotMeta({});
         setMessage(error.message || "홈 데이터를 불러오지 못했습니다.");
@@ -286,6 +320,11 @@ export default function Home() {
   useEffect(() => {
     let timeoutId;
     let cancelled = false;
+    const requestFilters = {
+      region: activeFilters.region,
+      ranking: "거래대금",
+      horizon: activeFilters.horizon,
+    };
 
     const scheduleNextLoad = () => {
       const currentMarketState = getKoreanMarketState();
@@ -293,12 +332,12 @@ export default function Home() {
       const delay = currentMarketState.isOpen ? 60_000 : 600_000;
       timeoutId = window.setTimeout(async () => {
         if (cancelled) return;
-        await loadOverview();
+        await loadOverview(requestFilters);
         if (!cancelled) scheduleNextLoad();
       }, delay);
     };
 
-    loadOverview().then(() => {
+    loadOverview(requestFilters).then(() => {
       if (!cancelled) scheduleNextLoad();
     });
 
@@ -306,12 +345,12 @@ export default function Home() {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [activeFilters]);
+  }, [activeFilters.region, activeFilters.horizon]);
 
   return (
     <div className="min-h-screen bg-obsidian-bg text-[#e2e2ec] font-inter">
       <div className="px-4 py-4 sm:px-6 sm:py-6">
-        <Header isLoggedIn={false} />
+        <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} />
 
         <main className="mx-auto flex w-full max-w-7xl flex-col gap-6">
           <section className="ai-glass rounded-lg p-4 sm:p-6">

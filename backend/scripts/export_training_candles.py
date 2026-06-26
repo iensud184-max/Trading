@@ -31,7 +31,6 @@ def load_env_file(path: Path) -> None:
 
 
 load_env_file(PROJECT_ROOT / "backend" / ".env")
-load_env_file(PROJECT_ROOT / ".env")
 
 
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "default-dev-encryption-key-32bytes!")

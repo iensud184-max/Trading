@@ -59,13 +59,18 @@ class MarketRepository:
         )
         response.raise_for_status()
 
-    def list_turnover_rankings(self, market_segment: str = "ALL", limit: int = 50) -> list[dict[str, Any]]:
+    def list_turnover_rankings(
+        self,
+        market_segment: str = "ALL",
+        limit: int = 50,
+        order_by: str = "trading_value.desc,updated_at.desc",
+    ) -> list[dict[str, Any]]:
         if not self.is_configured:
             return []
 
         params = {
             "select": "symbol,name,market_segment,current_price,change_rate,trading_volume,trading_value,as_of",
-            "order": "trading_value.desc,updated_at.desc",
+            "order": order_by,
             "limit": str(limit),
         }
         if market_segment and market_segment.upper() != "ALL":
@@ -153,6 +158,33 @@ class MarketRepository:
         )
         response.raise_for_status()
         return response.json()
+
+    def search_stock_master(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        """
+        주식 마스터 테이블에서 종목명 또는 종목코드로 키워드 검색을 수행합니다.
+        """
+        if not self.is_configured or not query:
+            return []
+
+        # name 또는 symbol에 대해 대소문자 구분 없는 부분일치 OR 조건 검색
+        params = {
+            "select": "symbol,name,market_segment,market_country,asset_type,source,is_active,listed_at,source_file_row",
+            "is_active": "eq.true",
+            "or": f"(name.ilike.*{query}*,symbol.ilike.*{query}*)",
+            "limit": str(limit),
+        }
+
+        try:
+            response = requests.get(
+                f"{self.supabase_url}/rest/v1/kis_stock_master",
+                headers=self._service_read_headers(),
+                params=params,
+                timeout=15,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception:
+            return []
 
     def _service_read_headers(self) -> dict[str, str]:
         return {

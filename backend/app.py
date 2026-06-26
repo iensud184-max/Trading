@@ -5,25 +5,30 @@ from flask import Flask
 from flask_cors import CORS
 from dotenv import load_dotenv
 
+# backend/.env를 백엔드 표준 환경 파일로 사용합니다.
+BACKEND_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BACKEND_DIR.parent
+load_dotenv(BACKEND_DIR / ".env")
+
 # backend 디렉토리가 파이썬 경로에 포함되도록 설정
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(str(PROJECT_ROOT))
 
 from backend.utils.crypto_helper import CryptoHelper
 from backend.services.news_repository import NewsRepository
 from backend.services.news_ingest import NewsIngestService
 from backend.services.news_summary_service import NewsSummaryService
 from backend.services.kis_market_universe import KISMarketUniverseService
+from backend.services.market_index_repository import MarketIndexRepository
+from backend.services.market_index_scheduler import start_market_index_scheduler
 from backend.services.market_snapshot_scheduler import start_market_snapshot_scheduler
 from backend.services.ml_scheduler import start_news_ingest_scheduler, start_ml_automation_scheduler
+from backend.services.portfolio_snapshot_scheduler import start_portfolio_snapshot_scheduler
 
 from backend.routes.home import home_bp
 from backend.routes.keys import keys_bp
 from backend.routes.ml import ml_bp
 from backend.routes.news import news_bp
 from backend.routes.trade import trade_bp
-
-# 환경 변수 로드
-load_dotenv()
 
 app = Flask(__name__)
 # 프론트엔드 연동을 위해 CORS 활성화 및 Authorization 헤더 허용
@@ -40,6 +45,10 @@ KIS_APPSECRET = os.getenv("KIS_APPSECRET", "")
 KIS_CANO = os.getenv("KIS_CANO", "")
 KIS_ACNT_PRDT_CD = os.getenv("KIS_ACNT_PRDT_CD", "01")
 KIS_ENV = os.getenv("KIS_ENV", "MOCK")
+COINONE_ACCESS_TOKEN = os.getenv("COINONE_ACCESS_TOKEN", "")
+COINONE_SECRET_KEY = os.getenv("COINONE_SECRET_KEY", "")
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
+BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "")
 
 NEWS_INGEST_ENABLED = os.getenv("NEWS_INGEST_ENABLED", "false").lower() == "true"
 NEWS_INGEST_INTERVAL_SECONDS = int(os.getenv("NEWS_INGEST_INTERVAL_SECONDS", "600"))
@@ -49,6 +58,12 @@ HOME_MARKET_OPEN_INTERVAL_SECONDS = int(os.getenv("HOME_MARKET_OPEN_INTERVAL_SEC
 HOME_MARKET_CLOSED_INTERVAL_SECONDS = int(os.getenv("HOME_MARKET_CLOSED_INTERVAL_SECONDS", "600"))
 HOME_MARKET_SNAPSHOT_LIMIT = int(os.getenv("HOME_MARKET_SNAPSHOT_LIMIT", "300"))
 HOME_MARKET_SNAPSHOT_WORKERS = int(os.getenv("HOME_MARKET_SNAPSHOT_WORKERS", "2"))
+MARKET_INDEX_SNAPSHOT_ENABLED = os.getenv("MARKET_INDEX_SNAPSHOT_ENABLED", "true").lower() == "true"
+MARKET_INDEX_OPEN_INTERVAL_SECONDS = int(os.getenv("MARKET_INDEX_OPEN_INTERVAL_SECONDS", "60"))
+MARKET_INDEX_CLOSED_INTERVAL_SECONDS = int(os.getenv("MARKET_INDEX_CLOSED_INTERVAL_SECONDS", "600"))
+PORTFOLIO_SNAPSHOT_ENABLED = os.getenv("PORTFOLIO_SNAPSHOT_ENABLED", "true").lower() == "true"
+PORTFOLIO_SNAPSHOT_INTERVAL_SECONDS = int(os.getenv("PORTFOLIO_SNAPSHOT_INTERVAL_SECONDS", "60"))
+PORTFOLIO_SNAPSHOT_RUN_ON_START = os.getenv("PORTFOLIO_SNAPSHOT_RUN_ON_START", "false").lower() == "true"
 
 # Flask Config에 값 바인딩
 app.config["KIS_APPKEY"] = KIS_APPKEY
@@ -56,7 +71,11 @@ app.config["KIS_APPSECRET"] = KIS_APPSECRET
 app.config["KIS_CANO"] = KIS_CANO
 app.config["KIS_ACNT_PRDT_CD"] = KIS_ACNT_PRDT_CD
 app.config["KIS_ENV"] = KIS_ENV
-app.config["PROJECT_ROOT_PATH"] = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+app.config["COINONE_ACCESS_TOKEN"] = COINONE_ACCESS_TOKEN
+app.config["COINONE_SECRET_KEY"] = COINONE_SECRET_KEY
+app.config["BINANCE_API_KEY"] = BINANCE_API_KEY
+app.config["BINANCE_SECRET_KEY"] = BINANCE_SECRET_KEY
+app.config["PROJECT_ROOT_PATH"] = PROJECT_ROOT
 
 # 전역 공유 서비스 인스턴스 초기화 및 App 바인딩 (의존성 주입)
 crypto = CryptoHelper(ENCRYPTION_KEY)
@@ -64,12 +83,14 @@ news_repository = NewsRepository()
 news_ingest_service = NewsIngestService()
 news_summary_service = NewsSummaryService()
 kis_market_universe_service = KISMarketUniverseService()
+market_index_repository = MarketIndexRepository()
 
 app.crypto = crypto
 app.news_repository = news_repository
 app.news_ingest_service = news_ingest_service
 app.news_summary_service = news_summary_service
 app.kis_market_universe_service = kis_market_universe_service
+app.market_index_repository = market_index_repository
 
 # Blueprint 등록
 app.register_blueprint(home_bp)
@@ -104,6 +125,18 @@ if __name__ == "__main__":
             closed_interval_seconds=HOME_MARKET_CLOSED_INTERVAL_SECONDS,
             quote_limit=HOME_MARKET_SNAPSHOT_LIMIT,
             max_workers=HOME_MARKET_SNAPSHOT_WORKERS,
+        )
+        start_market_index_scheduler(
+            market_index_repository=market_index_repository,
+            enabled=MARKET_INDEX_SNAPSHOT_ENABLED,
+            open_interval_seconds=MARKET_INDEX_OPEN_INTERVAL_SECONDS,
+            closed_interval_seconds=MARKET_INDEX_CLOSED_INTERVAL_SECONDS,
+        )
+        start_portfolio_snapshot_scheduler(
+            crypto_helper=crypto,
+            enabled=PORTFOLIO_SNAPSHOT_ENABLED,
+            interval_seconds=PORTFOLIO_SNAPSHOT_INTERVAL_SECONDS,
+            run_on_start=PORTFOLIO_SNAPSHOT_RUN_ON_START,
         )
     # Flask 서버 구동
     app.run(host="0.0.0.0", port=5050, debug=True)

@@ -250,20 +250,26 @@ export default function App() {
   const [infoSubmitLoading, setInfoSubmitLoading] = useState(false)
 
   useEffect(() => {
+    const clearHash = () => {
+      if (window.location.href.includes('#')) {
+        window.history.replaceState(
+          null,
+          document.title,
+          window.location.pathname + window.location.search
+        )
+      }
+    }
+
+    clearHash()
+
     const checkUserSession = async (session) => {
       if (session) {
         setIsLoggedIn(true)
         setUserEmail(session.user.email)
         setUserId(session.user.id)
 
-        // OAuth 로그인 후 주소창의 # 해시 잔재물 제거
-        if (window.location.hash) {
-          window.history.replaceState(
-            null,
-            document.title,
-            window.location.pathname + window.location.search
-          )
-        }
+        // OAuth 로그인 후 주소창의 # 해시 잔재물 제거 (비동기 타이밍 대응)
+        setTimeout(clearHash, 100)
 
         try {
           const { data } = await supabase

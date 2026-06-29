@@ -80,7 +80,7 @@ teamproject/
 │   │   ├── keys.py               # API 키 등록, 저장, 조회, 테스트 라우트 Blueprint
 │   │   ├── ml.py                 # ML 데이터셋 추출, 작업 상태, 학습/튜닝, 활성 모델, 리포트 라우트 Blueprint
 │   │   ├── news.py               # 뉴스 피드 조회, 실시간 동기화, AI 요약 보장 라우트 Blueprint
-│   │   └── trade.py              # 디테일 페이지 수동 주문, 주문 사전검증, 차트/호가/체결/심볼 매핑 라우트 Blueprint
+│   │   └── trade.py              # 디테일 페이지 수동 주문, 주문 사전검증, 주문 취소/정정, 차트/호가/체결/심볼 매핑 라우트 Blueprint
 │   ├── services/                 # 비즈니스 로직 서비스 레이어
 │   │   ├── exchange_client.py    # 거래소/브로커 추상화 부모 클래스 (현재 구현됨)
 │   │   ├── toss_client.py        # Toss Open API 메인 주식 클라이언트 (현재 구현됨)
@@ -136,7 +136,7 @@ teamproject/
         │   ├── Home.jsx          # 서비스 소개 및 온보딩 메인 랜딩 페이지
         │   ├── Settings.jsx      # 사용자 계정 및 투자성향 재분석 설정 페이지
         │   ├── AssetsTab.jsx     # 대시보드 - 보유 자산 현황 요약 탭 뷰
-        │   ├── TradeHistoryTab.jsx # 대시보드 - 주문/체결 제안 수동 승인 및 이력 조회 탭 뷰
+        │   ├── TradeHistoryTab.jsx # 대시보드 - 로그인 사용자 거래내역 조회 및 미체결 주문 취소/정정 탭 뷰
         │   └── WatchlistTab.jsx  # 대시보드 - 사용자 등록 관심 종목 감시 및 예측 점수 탭 뷰
         ├── components/           # 재사용 가능한 UI 컴포넌트
         │   ├── Header.jsx        # 상단 공통 헤더

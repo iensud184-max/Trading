@@ -53,11 +53,13 @@ class KISClient(ExchangeClient):
             self.balance_tr_id = "TTTC8434R"
             self.buy_tr_id = "TTTC0802U"
             self.sell_tr_id = "TTTC0801U"
+            self.modify_cancel_tr_id = "TTTC0803U"
         else:
             self.base_url = "https://openapivts.koreainvestment.com:29443"
             self.balance_tr_id = "VTTC8434R"
             self.buy_tr_id = "VTTC0802U"
             self.sell_tr_id = "VTTC0801U"
+            self.modify_cancel_tr_id = "VTTC0803U"
 
     def _clear_token_cache(self):
         """
@@ -415,16 +417,36 @@ class KISClient(ExchangeClient):
             "CTX_AREA_FK100": "",
             "CTX_AREA_NK100": ""
         }
-        res = requests.get(url, headers=headers, params=params, timeout=10)
-        if res.status_code != 200:
-            raise Exception(f"KIS get_balance failed: {res.text}")
-            
-        data = res.json()
-        if data.get("rt_cd") != "0":
-            raise Exception(f"KIS get_balance error: {data.get('msg1')}")
-            
-        output1 = data.get("output1", [])
-        output2 = data.get("output2", [])
+        output1 = []
+        output2 = []
+
+        # KIS 잔고 응답은 보유 종목이 많으면 CTX_AREA 토큰으로 나뉘어 내려올 수 있습니다.
+        for _ in range(10):
+            res = requests.get(url, headers=headers, params=params, timeout=10)
+            if res.status_code != 200:
+                raise Exception(f"KIS get_balance failed: {res.text}")
+
+            data = res.json()
+            if data.get("rt_cd") != "0":
+                raise Exception(f"KIS get_balance error: {data.get('msg1')}")
+
+            page_output1 = data.get("output1", []) or []
+            page_output2 = data.get("output2", []) or []
+            output1.extend(page_output1)
+            if page_output2:
+                output2 = page_output2
+
+            next_fk100 = str(data.get("ctx_area_fk100") or data.get("CTX_AREA_FK100") or "").strip()
+            next_nk100 = str(data.get("ctx_area_nk100") or data.get("CTX_AREA_NK100") or "").strip()
+            tr_cont = str(res.headers.get("tr_cont") or res.headers.get("Tr_Cont") or "").upper()
+
+            if not next_fk100 and not next_nk100:
+                break
+            if tr_cont and tr_cont not in {"M", "F"}:
+                break
+
+            params["CTX_AREA_FK100"] = next_fk100
+            params["CTX_AREA_NK100"] = next_nk100
         
         holdings = []
         for stock in output1:
@@ -526,14 +548,111 @@ class KISClient(ExchangeClient):
         output = data.get("output", {})
         return {
             "order_id": output.get("ODNO", ""),
+            "order_org_no": output.get("KRX_FWDG_ORD_ORGNO", ""),
             "status": "ORDERED",
             "raw": data
         }
 
+    def _modify_or_cancel_order(
+        self,
+        order_id: str,
+        order_org_no: str = "",
+        action: str = "CANCEL",
+        price: float | None = None,
+        quantity: float | None = None,
+        ord_type: str = "LIMIT",
+    ) -> dict:
+        """
+        KIS 국내주식 주문 정정/취소 요청을 전송합니다.
+        action은 CANCEL 또는 MODIFY를 사용합니다.
+        """
+        _enforce_kis_mock_rate_limit(self.env)
+        if not order_id:
+            raise ValueError("KIS 원주문번호가 필요합니다.")
+
+        action_upper = action.upper()
+        if action_upper not in ("CANCEL", "MODIFY"):
+            raise ValueError("지원하지 않는 KIS 주문 액션입니다.")
+        if action_upper == "MODIFY" and price is None and quantity is None:
+            raise ValueError("정정할 가격 또는 수량이 필요합니다.")
+
+        url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-rvsecncl"
+        token = self._get_cached_token()
+        headers = {
+            "content-type": "application/json",
+            "authorization": f"Bearer {token}",
+            "appkey": self.appkey,
+            "appsecret": self.appsecret,
+            "tr_id": self.modify_cancel_tr_id,
+        }
+
+        ord_dvsn = "00" if ord_type.upper() == "LIMIT" else "01"
+        order_price = int(price) if price is not None else 0
+        order_qty = int(quantity) if quantity is not None else 0
+
+        payload = {
+            "CANO": self.cano,
+            "ACNT_PRDT_CD": self.acnt_prdt_cd,
+            "KRX_FWDG_ORD_ORGNO": order_org_no or "",
+            "ORGN_ODNO": order_id,
+            "ORD_DVSN": ord_dvsn,
+            "RVSE_CNCL_DVSN_CD": "01" if action_upper == "MODIFY" else "02",
+            "ORD_QTY": str(order_qty),
+            "ORD_UNPR": str(order_price),
+            "QTY_ALL_ORD_YN": "Y" if action_upper == "CANCEL" and quantity is None else "N",
+        }
+
+        res = requests.post(url, json=payload, headers=headers, timeout=10)
+        if res.status_code != 200:
+            raise Exception(f"KIS order {action_upper.lower()} failed: {res.text}")
+
+        data = res.json()
+        if data.get("rt_cd") != "0":
+            raise Exception(f"KIS order {action_upper.lower()} error: {data.get('msg1')}")
+
+        output = data.get("output", {})
+        return {
+            "order_id": output.get("ODNO", order_id),
+            "order_org_no": output.get("KRX_FWDG_ORD_ORGNO", order_org_no or ""),
+            "status": "MODIFIED" if action_upper == "MODIFY" else "CANCELED",
+            "raw": data,
+        }
+
+    def cancel_order(self, order_id: str, order_org_no: str = "", quantity: float | None = None) -> dict:
+        """
+        KIS 국내주식 미체결 주문을 취소합니다.
+        """
+        return self._modify_or_cancel_order(
+            order_id=order_id,
+            order_org_no=order_org_no,
+            action="CANCEL",
+            quantity=quantity,
+        )
+
+    def modify_order(
+        self,
+        order_id: str,
+        order_org_no: str = "",
+        price: float | None = None,
+        quantity: float | None = None,
+        ord_type: str = "LIMIT",
+    ) -> dict:
+        """
+        KIS 국내주식 미체결 주문을 정정합니다.
+        """
+        return self._modify_or_cancel_order(
+            order_id=order_id,
+            order_org_no=order_org_no,
+            action="MODIFY",
+            price=price,
+            quantity=quantity,
+            ord_type=ord_type,
+        )
+
     def get_order_status(self, order_id: str) -> dict:
         return {
             "order_id": order_id,
-            "status": "EXECUTED",
+            "status": "ORDERED",
             "qty": 0.0,
             "executed_qty": 0.0,
             "raw": {}

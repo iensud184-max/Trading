@@ -100,6 +100,7 @@ erDiagram
         string asset_type "자산 종류 (CRYPTO | STOCK)"
         string ticker "내부 종목코드"
         string symbol "Toss API symbol"
+        string broker_env "브로커 환경 (MOCK | REAL)"
         string side "매수/매도 구분 (BUY | SELL)"
         numeric price "주문 가격"
         numeric volume "주문 수량"
@@ -110,9 +111,14 @@ erDiagram
         string currency "통화 (KRW | USD)"
         string client_order_id "Toss clientOrderId"
         string external_order_id "Toss orderId"
+        string external_order_org_no "KIS 원주문 조직번호"
+        json raw_order_payload "거래소 주문 원 응답"
+        uuid replaced_from_id FK "취소 후 재주문 원 주문 참조"
         string status "상태"
         string failure_reason "실패 사유 로그"
         timestamp created_at "제안 일시"
+        timestamp modified_at "주문 정정 일시"
+        timestamp canceled_at "주문 취소 일시"
     }
 
     auto_trading_rules {
@@ -374,6 +380,7 @@ erDiagram
 * **동작 원리**:
   * 이 테이블의 상태(`status`)가 `PENDING`으로 추가되면, Supabase Realtime 기능이 이를 트리거하여 프론트엔드 대시보드 챗봇 영역에 매매 승인/반대 카드를 실시간으로 렌더링합니다.
   * 사용자가 승인하면 백엔드는 주문 전 검증을 다시 수행하고, Toss 주문 생성 API 호출 시 `client_order_id`를 `clientOrderId`로 전달합니다.
+  * Coinone/Binance처럼 거래소 자체 정정 API 대신 취소 후 재주문 방식을 사용하는 경우, 새 주문 제안은 `replaced_from_id`로 원 주문 제안을 참조합니다.
 
 | 컬럼명 | 데이터 타입 | 제약 조건 | 설명 |
 | :--- | :--- | :--- | :--- |
@@ -383,6 +390,7 @@ erDiagram
 | `asset_type` | `TEXT` | CHECK (asset_type IN ('CRYPTO', 'STOCK')), NOT NULL | 자산 유형 |
 | `ticker` | `TEXT` | NOT NULL | 내부 종목 코드 |
 | `symbol` | `TEXT` | - | Toss API 호출용 종목 심볼 |
+| `broker_env` | `TEXT` | CHECK (broker_env IN ('MOCK', 'REAL')), DEFAULT 'REAL' | 브로커 환경 구분 |
 | `side` | `TEXT` | CHECK (side IN ('BUY', 'SELL')), NOT NULL | 거래 구분 |
 | `price` | `NUMERIC` | - | 제안 단가. 시장가 또는 금액 주문은 NULL 가능 |
 | `volume` | `NUMERIC` | - | 주문 수량. Toss `quantity`와 매핑 |
@@ -393,9 +401,14 @@ erDiagram
 | `currency` | `TEXT` | CHECK (currency IN ('KRW', 'USD')) | 거래 통화 |
 | `client_order_id` | `TEXT` | UNIQUE | Toss 주문 생성 멱등성 키 |
 | `external_order_id` | `TEXT` | - | Toss `orderId` |
-| `status` | `TEXT` | CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'EXECUTED', 'FAILED')), DEFAULT 'PENDING' | 승인 상태 흐름 |
+| `external_order_org_no` | `TEXT` | - | KIS 정정/취소에 필요한 원주문 조직번호 |
+| `raw_order_payload` | `JSONB` | - | 거래소 주문 생성 원 응답. 민감정보 저장 금지 |
+| `replaced_from_id` | `UUID` | FK, References `trade_proposals(id)` | Coinone/Binance 등 취소 후 재주문 방식에서 원 주문 레코드 참조 |
+| `status` | `TEXT` | CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'EXECUTED', 'FAILED', 'CANCELED', 'MODIFIED')), DEFAULT 'PENDING' | 승인 및 주문 처리 상태 흐름 |
 | `failure_reason` | `TEXT` | - | 주문 실행 실패 시 에러 사유 |
 | `created_at` | `TIMESTAMPTZ` | DEFAULT now(), NOT NULL | 제안 생성 시각 |
+| `modified_at` | `TIMESTAMPTZ` | - | 주문 정정 요청 완료 시각 |
+| `canceled_at` | `TIMESTAMPTZ` | - | 주문 취소 요청 완료 시각 |
 
 ---
 
@@ -488,6 +501,8 @@ erDiagram
    - 시간별(hourly) 자산 스냅샷 시계열을 수집 및 저장하기 위한 `portfolio_snapshots` 테이블을 구축하고, 사용자별 RLS 조회를 강화했습니다.
 4. **마켓 주요 지수 스냅샷 마이그레이션 (`20260626101500_create_market_indices_latest.sql`)**
    - 글로벌 지수 정보의 일관된 보관과 조회를 보장하기 위한 `market_indices_latest` 테이블을 생성하고 RLS 및 읽기/쓰기 역할 권한 조정을 적용했습니다.
+5. **거래내역 주문 액션 마이그레이션 (`20260629143000_extend_trade_proposals_order_actions.sql`)**
+   - `trade_proposals`에 `broker_env`, `external_order_org_no`, `raw_order_payload`, `replaced_from_id`, `modified_at`, `canceled_at` 컬럼을 추가하고, 상태값에 `CANCELED`, `MODIFIED`를 확장하여 거래내역 탭의 Toss/KIS 주문 취소/정정 및 Coinone/Binance 취소 후 재주문 흐름을 지원합니다.
 
 ---
 

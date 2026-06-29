@@ -493,10 +493,12 @@ class TossClient(ExchangeClient):
 
     def _place_order_impl(self, symbol: str, qty: float, side: str, ord_type: str, price: float = None) -> dict:
         if self.env == "MOCK":
+            client_order_id = f"mock-toss-{uuid.uuid4().hex[:16]}"
             return {
                 "order_id": f"MOCK-TOSS-{int(time.time())}",
                 "status": "ORDERED",
-                "raw": {"symbol": symbol, "qty": qty, "side": side, "ord_type": ord_type}
+                "client_order_id": client_order_id,
+                "raw": {"symbol": symbol, "qty": qty, "side": side, "ord_type": ord_type, "client_order_id": client_order_id}
             }
             
         token = self._get_cached_token()
@@ -526,6 +528,7 @@ class TossClient(ExchangeClient):
         return {
             "order_id": result.get("orderId"),
             "status": result.get("status"),
+            "client_order_id": client_order_id,
             "raw": data
         }
 
@@ -535,7 +538,85 @@ class TossClient(ExchangeClient):
         """
         return self._place_order_impl(symbol, qty, side, ord_type, price)
 
+    def cancel_order(self, order_id: str) -> dict:
+        """
+        접수된 토스 대기 주문을 취소합니다.
+        """
+        if self.env == "MOCK":
+            return {
+                "order_id": order_id,
+                "status": "CANCELED",
+                "raw": {"order_id": order_id, "env": self.env}
+            }
+
+        token = self._get_cached_token()
+        url = f"{self.base_url}/api/v1/orders/{order_id}/cancel"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Tossinvest-Account": self.account_seq,
+            "Content-Type": "application/json"
+        }
+        res = self._send_request("POST", url, headers=headers)
+        if res.status_code != 200:
+            raise Exception(f"토스 주문 취소 실패: {res.text}")
+
+        data = res.json()
+        result = data.get("result", {})
+        return {
+            "order_id": result.get("orderId", order_id),
+            "status": result.get("status", "CANCELED"),
+            "raw": data
+        }
+
+    def modify_order(self, order_id: str, price: float | None = None, quantity: float | None = None) -> dict:
+        """
+        접수된 토스 대기 주문의 가격 또는 수량을 정정합니다.
+        """
+        if price is None and quantity is None:
+            raise ValueError("정정할 가격 또는 수량이 필요합니다.")
+
+        if self.env == "MOCK":
+            return {
+                "order_id": order_id,
+                "status": "MODIFIED",
+                "raw": {"order_id": order_id, "price": price, "quantity": quantity, "env": self.env}
+            }
+
+        token = self._get_cached_token()
+        url = f"{self.base_url}/api/v1/orders/{order_id}/modify"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Tossinvest-Account": self.account_seq,
+            "Content-Type": "application/json"
+        }
+        payload = {}
+        if price is not None:
+            payload["price"] = price
+        if quantity is not None:
+            payload["quantity"] = quantity
+
+        res = self._send_request("POST", url, json=payload, headers=headers)
+        if res.status_code != 200:
+            raise Exception(f"토스 주문 정정 실패: {res.text}")
+
+        data = res.json()
+        result = data.get("result", {})
+        return {
+            "order_id": result.get("orderId", order_id),
+            "status": result.get("status", "MODIFIED"),
+            "raw": data
+        }
+
     def _get_order_status_impl(self, order_id: str) -> dict:
+        if self.env == "MOCK":
+            return {
+                "order_id": order_id,
+                "status": "ORDERED",
+                "qty": 0.0,
+                "executed_qty": 0.0,
+                "raw": {"order_id": order_id, "env": self.env}
+            }
+
         token = self._get_cached_token()
         url = f"{self.base_url}/api/v1/orders/{order_id}"
         headers = {

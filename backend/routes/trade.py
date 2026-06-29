@@ -253,6 +253,76 @@ def _build_exchange_client(exchange: str, broker_env: str, record: dict, access_
     return None
 
 
+def _load_user_trade_proposal(auth_header: str, user_id: str, proposal_id: str) -> dict:
+    """
+    로그인 사용자의 주문 제안/이력 레코드를 단건 조회합니다.
+    """
+    records = query_supabase(
+        auth_header,
+        "trade_proposals",
+        "GET",
+        params={
+            "id": f"eq.{proposal_id}",
+            "user_id": f"eq.{user_id}",
+            "limit": "1",
+        },
+    )
+    if not records:
+        raise ValueError("해당 거래내역을 찾을 수 없거나 접근 권한이 없습니다.")
+    return records[0]
+
+
+def _patch_trade_proposal(auth_header: str, proposal_id: str, payload: dict):
+    """
+    trade_proposals 레코드를 부분 업데이트합니다.
+    """
+    return query_supabase(auth_header, f"trade_proposals?id=eq.{proposal_id}", "PATCH", json_data=payload)
+
+
+def _insert_trade_proposal_with_schema_fallback(auth_header: str, payload: dict):
+    """
+    최신 스키마 컬럼이 아직 적용되지 않은 DB에서도 주문 이력 저장이 깨지지 않도록 폴백합니다.
+    """
+    try:
+        return query_supabase(auth_header, "trade_proposals", "POST", json_data=payload)
+    except Exception:
+        legacy_payload = {
+            key: value
+            for key, value in payload.items()
+            if key not in {
+                "broker_env",
+                "external_order_org_no",
+                "raw_order_payload",
+                "replaced_from_id",
+                "modified_at",
+                "canceled_at",
+            }
+        }
+        return query_supabase(auth_header, "trade_proposals", "POST", json_data=legacy_payload)
+
+
+def _is_terminal_order_status(status: str | None) -> bool:
+    """
+    거래소 주문 상태가 더 이상 정정/취소될 수 없는 상태인지 판단합니다.
+    """
+    normalized = str(status or "").upper()
+    return normalized in {"EXECUTED", "FILLED", "COMPLETED", "DONE", "CANCELED", "CANCELLED", "REJECTED", "FAILED", "EXPIRED"}
+
+
+def _resolve_proposal_broker_env(proposal: dict, fallback: str | None = None) -> str:
+    """
+    거래내역 레코드에 저장된 broker_env를 우선 사용하고, 과거 레코드는 요청값 또는 REAL로 보정합니다.
+    """
+    return str(proposal.get("broker_env") or fallback or "REAL").upper()
+
+
+def _resolve_order_org_no(proposal: dict) -> str:
+    """
+    KIS 정정/취소에 필요한 원주문 조직번호를 조회합니다.
+    """
+    return str(proposal.get("external_order_org_no") or proposal.get("client_order_id") or "")
+
+
 def _load_kis_client_from_records(records_kis: list[dict]):
     """
     KIS 레코드 목록이 있을 때 즉시 사용할 클라이언트를 생성합니다.
@@ -651,16 +721,20 @@ def place_manual_order():
             "asset_type": asset_type,
             "ticker": symbol,
             "symbol": symbol,
+            "broker_env": broker_env,
             "side": action.upper(),
             "price": order_price,
             "volume": qty,
             "ord_type": order_type.upper(),
             "market_country": market_country,
             "currency": currency,
+            "client_order_id": order_res.get("client_order_id"),
+            "external_order_org_no": order_res.get("order_org_no"),
             "external_order_id": order_res.get("order_id"),
-            "status": "EXECUTED"
+            "raw_order_payload": order_res.get("raw"),
+            "status": "EXECUTED" if _is_terminal_order_status(order_res.get("status")) else "APPROVED"
         }
-        query_supabase(auth_header, "trade_proposals", "POST", json_data=proposal_data)
+        _insert_trade_proposal_with_schema_fallback(auth_header, proposal_data)
     except Exception as e:
         current_app.logger.error(f"주문 이력 기록 실패: {str(e)}")
 
@@ -672,6 +746,279 @@ def place_manual_order():
         "auto_exit": auto_exit_result,
         "detail": order_res
     })
+
+
+@trade_bp.route("/api/trade/order/cancel", methods=["POST"])
+def cancel_manual_order():
+    """
+    로그인 사용자의 미체결 주문을 취소합니다.
+    실제 거래소 주문번호가 없는 PENDING 제안은 DB 상태만 CANCELED로 변경합니다.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"success": False, "message": "인증 헤더가 누락되었습니다."}), 401
+
+    try:
+        user_id, _ = get_user_id_from_header(auth_header)
+    except Exception as e:
+        return jsonify({"success": False, "message": f"인증 실패: {str(e)}"}), 401
+
+    data = request.json or {}
+    proposal_id = data.get("proposal_id")
+    broker_env_override = data.get("broker_env")
+    if not proposal_id:
+        return jsonify({"success": False, "message": "proposal_id가 필요합니다."}), 400
+
+    try:
+        proposal = _load_user_trade_proposal(auth_header, user_id, proposal_id)
+    except ValueError as e:
+        return jsonify({"success": False, "message": str(e)}), 404
+    except Exception as e:
+        return jsonify({"success": False, "message": f"거래내역 조회 실패: {str(e)}"}), 500
+
+    status = str(proposal.get("status") or "").upper()
+    if status in {"EXECUTED", "CANCELED", "REJECTED", "FAILED"}:
+        return jsonify({"success": False, "message": "이미 완료되었거나 취소할 수 없는 주문입니다."}), 400
+
+    order_id = proposal.get("external_order_id")
+    if not order_id:
+        _patch_trade_proposal(auth_header, proposal_id, {
+            "status": "CANCELED",
+            "failure_reason": None,
+            "canceled_at": datetime.utcnow().isoformat() + "Z",
+        })
+        return jsonify({"success": True, "message": "주문 제안이 취소되었습니다.", "status": "CANCELED"})
+
+    exchange = proposal.get("exchange")
+    broker_env = _resolve_proposal_broker_env(proposal, broker_env_override)
+    if exchange not in ("TOSS", "KIS"):
+        return jsonify({"success": False, "message": f"{exchange} 주문 취소는 아직 지원하지 않습니다."}), 400
+
+    try:
+        record, access_key, secret_key = _load_user_exchange_record(auth_header, user_id, exchange, broker_env)
+        client = _build_exchange_client(exchange, broker_env, record, access_key, secret_key)
+        current_status = client.get_order_status(order_id)
+        if exchange != "KIS" and _is_terminal_order_status(current_status.get("status")):
+            return jsonify({"success": False, "message": "이미 체결 또는 종료된 주문이라 취소할 수 없습니다.", "detail": current_status}), 400
+
+        if exchange == "KIS":
+            cancel_result = client.cancel_order(order_id, order_org_no=_resolve_order_org_no(proposal))
+        else:
+            cancel_result = client.cancel_order(order_id)
+        _patch_trade_proposal(auth_header, proposal_id, {
+            "status": "CANCELED",
+            "failure_reason": None,
+            "canceled_at": datetime.utcnow().isoformat() + "Z",
+        })
+        return jsonify({
+            "success": True,
+            "message": "주문 취소 요청이 완료되었습니다.",
+            "status": "CANCELED",
+            "detail": cancel_result,
+        })
+    except ValueError as e:
+        return jsonify({"success": False, "message": str(e)}), 400
+    except Exception as e:
+        _patch_trade_proposal(auth_header, proposal_id, {
+            "failure_reason": f"주문 취소 실패: {str(e)[:500]}",
+        })
+        return jsonify({"success": False, "message": f"주문 취소 실패: {str(e)}"}), 500
+
+
+@trade_bp.route("/api/trade/order/modify", methods=["POST"])
+def modify_manual_order():
+    """
+    로그인 사용자의 Toss 미체결 주문 가격 또는 수량을 정정합니다.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"success": False, "message": "인증 헤더가 누락되었습니다."}), 401
+
+    try:
+        user_id, _ = get_user_id_from_header(auth_header)
+    except Exception as e:
+        return jsonify({"success": False, "message": f"인증 실패: {str(e)}"}), 401
+
+    data = request.json or {}
+    proposal_id = data.get("proposal_id")
+    new_price = data.get("price")
+    new_quantity = data.get("quantity")
+    broker_env_override = data.get("broker_env")
+
+    if not proposal_id:
+        return jsonify({"success": False, "message": "proposal_id가 필요합니다."}), 400
+    if new_price in (None, "") and new_quantity in (None, ""):
+        return jsonify({"success": False, "message": "정정할 가격 또는 수량이 필요합니다."}), 400
+
+    try:
+        proposal = _load_user_trade_proposal(auth_header, user_id, proposal_id)
+    except ValueError as e:
+        return jsonify({"success": False, "message": str(e)}), 404
+    except Exception as e:
+        return jsonify({"success": False, "message": f"거래내역 조회 실패: {str(e)}"}), 500
+
+    status = str(proposal.get("status") or "").upper()
+    if status in {"EXECUTED", "CANCELED", "REJECTED", "FAILED"}:
+        return jsonify({"success": False, "message": "이미 완료되었거나 정정할 수 없는 주문입니다."}), 400
+
+    order_id = proposal.get("external_order_id")
+    if not order_id:
+        return jsonify({"success": False, "message": "거래소 주문번호가 없어 실제 주문 정정을 할 수 없습니다."}), 400
+
+    exchange = proposal.get("exchange")
+    broker_env = _resolve_proposal_broker_env(proposal, broker_env_override)
+    if exchange not in ("TOSS", "KIS"):
+        return jsonify({"success": False, "message": f"{exchange} 주문 정정은 아직 지원하지 않습니다."}), 400
+
+    try:
+        price_value = float(new_price) if new_price not in (None, "") else None
+        quantity_value = float(new_quantity) if new_quantity not in (None, "") else None
+        if price_value is not None and price_value <= 0:
+            return jsonify({"success": False, "message": "정정 가격은 0보다 커야 합니다."}), 400
+        if quantity_value is not None and quantity_value <= 0:
+            return jsonify({"success": False, "message": "정정 수량은 0보다 커야 합니다."}), 400
+
+        record, access_key, secret_key = _load_user_exchange_record(auth_header, user_id, exchange, broker_env)
+        client = _build_exchange_client(exchange, broker_env, record, access_key, secret_key)
+        current_status = client.get_order_status(order_id)
+        if exchange != "KIS" and _is_terminal_order_status(current_status.get("status")):
+            return jsonify({"success": False, "message": "이미 체결 또는 종료된 주문이라 정정할 수 없습니다.", "detail": current_status}), 400
+
+        market_country = proposal.get("market_country")
+        if exchange == "TOSS" and market_country == "US" and quantity_value is not None:
+            return jsonify({"success": False, "message": "Toss 해외주식 주문은 가격 정정만 지원합니다."}), 400
+
+        if exchange == "KIS":
+            if quantity_value is None:
+                quantity_value = float(proposal.get("volume") or 0)
+            if price_value is None:
+                price_value = float(proposal.get("price") or 0)
+            if quantity_value <= 0 or price_value <= 0:
+                return jsonify({"success": False, "message": "KIS 정정에는 유효한 가격과 수량이 필요합니다."}), 400
+            modify_result = client.modify_order(
+                order_id,
+                order_org_no=_resolve_order_org_no(proposal),
+                price=price_value,
+                quantity=quantity_value,
+                ord_type=proposal.get("ord_type") or "LIMIT",
+            )
+        else:
+            modify_result = client.modify_order(order_id, price=price_value, quantity=quantity_value)
+        patch_payload = {
+            "status": "MODIFIED",
+            "failure_reason": None,
+            "modified_at": datetime.utcnow().isoformat() + "Z",
+        }
+        if price_value is not None:
+            patch_payload["price"] = price_value
+        if quantity_value is not None:
+            patch_payload["volume"] = quantity_value
+        _patch_trade_proposal(auth_header, proposal_id, patch_payload)
+
+        return jsonify({
+            "success": True,
+            "message": "주문 정정 요청이 완료되었습니다.",
+            "status": "MODIFIED",
+            "detail": modify_result,
+        })
+    except ValueError as e:
+        return jsonify({"success": False, "message": str(e)}), 400
+    except Exception as e:
+        _patch_trade_proposal(auth_header, proposal_id, {
+            "failure_reason": f"주문 정정 실패: {str(e)[:500]}",
+        })
+        return jsonify({"success": False, "message": f"주문 정정 실패: {str(e)}"}), 500
+
+
+@trade_bp.route("/api/trade/order/cancel-replace", methods=["POST"])
+def cancel_replace_order():
+    """
+    Coinone/Binance 주문 제안을 취소하고 새 재주문 제안을 생성합니다.
+    실제 거래소 주문번호가 있는 경우에는 거래소별 취소 API가 연결되기 전까지 차단합니다.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"success": False, "message": "인증 헤더가 누락되었습니다."}), 401
+
+    try:
+        user_id, _ = get_user_id_from_header(auth_header)
+    except Exception as e:
+        return jsonify({"success": False, "message": f"인증 실패: {str(e)}"}), 401
+
+    data = request.json or {}
+    proposal_id = data.get("proposal_id")
+    new_price = data.get("price")
+    new_quantity = data.get("quantity")
+    if not proposal_id:
+        return jsonify({"success": False, "message": "proposal_id가 필요합니다."}), 400
+    if new_price in (None, "") and new_quantity in (None, ""):
+        return jsonify({"success": False, "message": "재주문할 가격 또는 수량이 필요합니다."}), 400
+
+    try:
+        proposal = _load_user_trade_proposal(auth_header, user_id, proposal_id)
+    except ValueError as e:
+        return jsonify({"success": False, "message": str(e)}), 404
+    except Exception as e:
+        return jsonify({"success": False, "message": f"거래내역 조회 실패: {str(e)}"}), 500
+
+    exchange = proposal.get("exchange")
+    if exchange not in ("COINONE", "BINANCE"):
+        return jsonify({"success": False, "message": "취소 후 재주문은 Coinone/Binance 주문에만 사용합니다."}), 400
+
+    status = str(proposal.get("status") or "").upper()
+    if status in {"EXECUTED", "CANCELED", "REJECTED", "FAILED"}:
+        return jsonify({"success": False, "message": "이미 완료되었거나 재주문할 수 없는 주문입니다."}), 400
+
+    if proposal.get("external_order_id"):
+        return jsonify({
+            "success": False,
+            "message": f"{exchange} 실제 주문 취소 API 연결 전에는 거래소 주문번호가 있는 주문을 취소 후 재주문할 수 없습니다.",
+        }), 400
+
+    try:
+        price_value = float(new_price) if new_price not in (None, "") else float(proposal.get("price") or 0)
+        quantity_value = float(new_quantity) if new_quantity not in (None, "") else float(proposal.get("volume") or 0)
+        if price_value <= 0:
+            return jsonify({"success": False, "message": "재주문 가격은 0보다 커야 합니다."}), 400
+        if quantity_value <= 0:
+            return jsonify({"success": False, "message": "재주문 수량은 0보다 커야 합니다."}), 400
+
+        _patch_trade_proposal(auth_header, proposal_id, {
+            "status": "CANCELED",
+            "failure_reason": None,
+            "canceled_at": datetime.utcnow().isoformat() + "Z",
+        })
+
+        replacement_payload = {
+            "user_id": user_id,
+            "exchange": exchange,
+            "asset_type": proposal.get("asset_type") or "CRYPTO",
+            "ticker": proposal.get("ticker"),
+            "symbol": proposal.get("symbol") or proposal.get("ticker"),
+            "broker_env": _resolve_proposal_broker_env(proposal, data.get("broker_env")),
+            "side": proposal.get("side"),
+            "price": price_value,
+            "volume": quantity_value,
+            "ord_type": proposal.get("ord_type") or "LIMIT",
+            "market_country": proposal.get("market_country"),
+            "currency": proposal.get("currency") or ("USD" if exchange == "BINANCE" else "KRW"),
+            "replaced_from_id": proposal_id,
+            "status": "PENDING",
+        }
+        created = _insert_trade_proposal_with_schema_fallback(auth_header, replacement_payload)
+        return jsonify({
+            "success": True,
+            "message": "기존 주문 제안을 취소하고 재주문 제안을 생성했습니다.",
+            "status": "PENDING",
+            "data": created,
+        })
+    except ValueError as e:
+        return jsonify({"success": False, "message": str(e)}), 400
+    except Exception as e:
+        _patch_trade_proposal(auth_header, proposal_id, {
+            "failure_reason": f"취소 후 재주문 실패: {str(e)[:500]}",
+        })
+        return jsonify({"success": False, "message": f"취소 후 재주문 실패: {str(e)}"}), 500
 
 @trade_bp.route("/api/chart/candles", methods=["GET"])
 def get_chart_candles():

@@ -86,7 +86,7 @@ sequenceDiagram
     Note over User, DB: 프론트엔드는 Realtime 기능으로 trade_proposals를 실시간 구독하고 있음
     DB-->>User: 챗봇 창에 [승인 / 거절] 액션 카드 자동 노출
     
-    rect rgb(30, 41, 59)
+    rect rgba(6, 182, 212, 0.15)
         Note over User, Exchange: 최종 주문 승인 및 실행 단계
         User->>Flask: [승인] 버튼 클릭 (주문 실행 API 호출)
         Flask->>DB: 사용자의 암호화된 API Key 조회 및 대칭키 복호화

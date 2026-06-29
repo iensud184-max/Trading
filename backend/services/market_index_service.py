@@ -4,15 +4,15 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import requests
-
 from backend.services.kis_client import KISClient
+from backend.services.toss_client import TossClient
 
 
 KST = timezone(timedelta(hours=9))
 logger = logging.getLogger(__name__)
 MARKET_INDEX_OPEN_STALE_SECONDS = int(os.getenv("MARKET_INDEX_OPEN_STALE_SECONDS", "180"))
 MARKET_INDEX_CLOSED_STALE_SECONDS = int(os.getenv("MARKET_INDEX_CLOSED_STALE_SECONDS", "1800"))
+_MARKET_INDEX_CACHE: list[dict[str, Any]] = []
 
 KIS_INDEX_DEFINITIONS = [
     {
@@ -47,7 +47,7 @@ KIS_INDEX_DEFINITIONS = [
     },
     {
         "symbol": "NASDAQ100_F",
-        "label": "NASDAQ 100 Futures",
+        "label": "나스닥 100 선물",
         "currency": "USD",
         "market_country": "US",
         "display_order": 50,
@@ -72,12 +72,35 @@ INDEX_DEFINITION_BY_SYMBOL = {item["symbol"]: item for item in KIS_INDEX_DEFINIT
 
 
 def _log_collection_stage(stage: str, symbol: str, payload: Any) -> None:
-    logger.info(
-        "[MarketIndex][%s] symbol=%s payload=%s",
-        stage,
-        symbol,
-        json.dumps(payload, ensure_ascii=False, default=str),
-    )
+    if stage == "error":
+        logger.warning(
+            "[MarketIndex][%s] symbol=%s errorMessage=%s",
+            stage,
+            symbol,
+            payload.get("errorMessage") if isinstance(payload, dict) else str(payload),
+        )
+        return
+
+    if isinstance(payload, dict):
+        logger.info(
+            "[MarketIndex][%s] symbol=%s source=%s cacheStatus=%s tokenStatus=%s",
+            stage,
+            symbol,
+            payload.get("source"),
+            payload.get("cacheStatus"),
+            payload.get("tokenStatus"),
+        )
+    else:
+        logger.info("[MarketIndex][%s] symbol=%s", stage, symbol)
+
+
+def set_market_index_cache(rows: list[dict[str, Any]]) -> None:
+    global _MARKET_INDEX_CACHE
+    _MARKET_INDEX_CACHE = list(rows or [])
+
+
+def get_market_index_cache() -> list[dict[str, Any]]:
+    return list(_MARKET_INDEX_CACHE)
 
 
 def _configured_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -133,225 +156,286 @@ def get_kis_market_index_client(env: str) -> KISClient | None:
     )
 
 
-def fetch_kis_domestic_index_snapshot(client: KISClient, definition: dict[str, Any]) -> dict[str, Any]:
-    token = client._get_cached_token()
-    response = requests.get(
-        f"{client.base_url}/uapi/domestic-stock/v1/quotations/inquire-index-price",
-        headers={
-            "content-type": "application/json; charset=utf-8",
-            "authorization": f"Bearer {token}",
-            "appkey": client.appkey,
-            "appsecret": client.appsecret,
-            "tr_id": "FHPUP02100000",
-        },
-        params={
-            "FID_COND_MRKT_DIV_CODE": "U",
-            "FID_INPUT_ISCD": definition["code"],
-        },
-        timeout=15,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if payload.get("rt_cd") != "0":
-        raise RuntimeError(payload.get("msg1") or f"Domestic index lookup failed for {definition['symbol']}")
+def get_toss_market_index_client() -> TossClient | None:
+    client_id = os.getenv("TOSS_API_KEY", "")
+    client_secret = os.getenv("TOSS_SECRET_KEY", "")
+    if not client_id or not client_secret:
+        return None
+    # 지수 수집의 1차 소스는 Toss로 두고, 자격 증명이 있을 때만 클라이언트를 만든다.
+    # 이렇게 해두면 설정이 없는 환경에서는 곧바로 폴백 경로로 넘어갈 수 있다.
+    return TossClient(client_id=client_id, client_secret=client_secret, env="REAL")
 
-    output = payload.get("output") or {}
-    current_value = float(output.get("bstp_nmix_prpr") or 0)
-    change_value = float(output.get("bstp_nmix_prdy_vrss") or 0)
-    change_percent = float(output.get("bstp_nmix_prdy_ctrt") or 0)
+
+def _diagnostics(
+    source: str,
+    primary_status: str,
+    fallback_status: str,
+    cache_status: str,
+    token_status: str,
+    error_message: str | None,
+) -> dict[str, Any]:
+    return {
+        "source": source,
+        "primaryStatus": primary_status,
+        "fallbackStatus": fallback_status,
+        "cacheStatus": cache_status,
+        "tokenStatus": token_status,
+        "errorMessage": error_message,
+    }
+
+
+def _attach_diagnostics(row: dict[str, Any], diagnostics: dict[str, Any]) -> dict[str, Any]:
+    raw_payload = row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {}
+    # 원본 payload 안에 진단 정보를 같이 넣어 후속 저장/응답에서 추적할 수 있게 한다.
+    # 저장소와 API 응답 양쪽에서 같은 문제를 다시 추적할 수 있도록 하는 용도다.
+    return {
+        **row,
+        "raw_payload": {
+            **raw_payload,
+            "diagnostics": diagnostics,
+        },
+    }
+
+
+def _calculate_market_change(current_price: float, previous_close: float) -> tuple[float, float]:
+    # 전일 종가 기준으로만 등락을 계산한다.
+    if not previous_close:
+        return 0.0, 0.0
+    change_price = current_price - previous_close
+    change_rate = (change_price / previous_close) * 100
+    return change_price, change_rate
+
+
+def _resolve_change_rate(
+    current_price: float,
+    previous_close: float,
+    change_price: float | None = None,
+    change_rate: float | None = None,
+) -> tuple[float, float]:
+    # 저장된 등락률이 있으면 우선 활용하고, 없을 때만 현재가/전일종가로 재계산한다.
+    if change_rate not in (None, ""):
+        try:
+            resolved_rate = float(change_rate)
+        except (TypeError, ValueError):
+            resolved_rate = 0.0
+        resolved_change_price = float(change_price or 0.0)
+        if resolved_rate or previous_close:
+            return resolved_change_price, resolved_rate
+
+    resolved_previous_close = float(previous_close or 0.0)
+    if resolved_previous_close:
+        return _calculate_market_change(current_price, resolved_previous_close)
+
+    return float(change_price or 0.0), 0.0
+
+
+def _canonical_market_label(symbol: str, fallback_label: str | None = None) -> str:
+    if str(symbol).upper() == "NASDAQ100_F":
+        return "나스닥 100 선물"
+    return fallback_label or str(symbol)
+
+
+def _normalize_market_index_row(row: dict[str, Any], definition: dict[str, Any]) -> dict[str, Any]:
+    # 새 컬럼(current_price/change_price 등)과 기존 컬럼(current_value/change_value 등)을 동시에 받아서 호환성을 유지한다.
+    current_price = float(row.get("current_price") or row.get("current_value") or 0)
+    previous_close = float(row.get("previous_close") or 0)
+    change_price, change_rate = _resolve_change_rate(
+        current_price=current_price,
+        previous_close=previous_close,
+        change_price=row.get("change_price") or row.get("change_value"),
+        change_rate=row.get("change_rate") or row.get("change_percent"),
+    )
+
+    synced_at = row.get("synced_at") or row.get("as_of")
+    raw_payload = row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {}
 
     normalized = {
-        "symbol": definition["symbol"],
-        "label": definition["label"],
-        "source": "KIS_OPEN_API",
-        "market_country": definition["market_country"],
-        "ticker": definition["code"],
-        "current_value": current_value,
-        "change_value": change_value,
-        "change_percent": change_percent,
-        "currency": definition["currency"],
-        "display_order": definition["display_order"],
-        "as_of": datetime.now(timezone.utc).isoformat(),
-        "raw_payload": payload,
+        "symbol": row.get("symbol") or definition["symbol"],
+        "label": _canonical_market_label(row.get("symbol") or definition["symbol"], row.get("label") or definition["label"]),
+        "source": row.get("source") or "UNKNOWN",
+        "market_country": row.get("market_country") or definition["market_country"],
+        "ticker": row.get("ticker") or definition.get("code") or definition["symbol"],
+        "current_price": current_price,
+        "previous_close": previous_close,
+        "change_price": change_price,
+        "change_rate": change_rate,
+        "current_value": current_price,
+        "change_value": change_price,
+        "change_percent": change_rate,
+        "currency": row.get("currency") or definition["currency"],
+        "display_order": row.get("display_order") or definition["display_order"],
+        "as_of": synced_at,
+        "synced_at": synced_at,
+        "raw_payload": raw_payload,
     }
-    _log_collection_stage(
-        "raw",
-        definition["symbol"],
-        {
-            "endpoint": "/uapi/domestic-stock/v1/quotations/inquire-index-price",
-            "env": definition.get("env"),
-            "params": {
-                "FID_COND_MRKT_DIV_CODE": "U",
-                "FID_INPUT_ISCD": definition["code"],
-            },
-            "response": payload,
-        },
-    )
-    _log_collection_stage("normalized", definition["symbol"], normalized)
     return normalized
 
 
-def fetch_kis_overseas_index_snapshot(client: KISClient, definition: dict[str, Any]) -> dict[str, Any]:
-    token = client._get_cached_token()
-    response = requests.get(
-        f"{client.base_url}/uapi/overseas-price/v1/quotations/inquire-time-indexchartprice",
-        headers={
-            "content-type": "application/json; charset=utf-8",
-            "authorization": f"Bearer {token}",
-            "appkey": client.appkey,
-            "appsecret": client.appsecret,
-            "tr_id": "FHKST03030200",
-        },
-        params={
-            "FID_COND_MRKT_DIV_CODE": "N",
-            "FID_INPUT_ISCD": definition["code"],
-            "FID_HOUR_CLS_CODE": "0",
-            "FID_PW_DATA_INCU_YN": "Y",
-        },
-        timeout=15,
+def _log_market_index_row(row: dict[str, Any], diagnostics: dict[str, Any]) -> None:
+    logger.debug(
+        "[MarketIndex][row] symbol=%s source=%s currentPrice=%s previousClose=%s changePrice=%s changeRate=%s cacheStatus=%s tokenStatus=%s primaryStatus=%s fallbackStatus=%s errorMessage=%s",
+        row.get("symbol"),
+        diagnostics.get("source"),
+        row.get("current_price"),
+        row.get("previous_close"),
+        row.get("change_price"),
+        row.get("change_rate"),
+        diagnostics.get("cacheStatus"),
+        diagnostics.get("tokenStatus"),
+        diagnostics.get("primaryStatus"),
+        diagnostics.get("fallbackStatus"),
+        diagnostics.get("errorMessage"),
     )
-    response.raise_for_status()
-    payload = response.json()
-    if payload.get("rt_cd") != "0":
-        raise RuntimeError(payload.get("msg1") or f"Overseas index lookup failed for {definition['symbol']}")
-
-    output = payload.get("output1") or {}
-    current_value = float(output.get("ovrs_nmix_prpr") or 0)
-    change_value = float(output.get("ovrs_nmix_prdy_vrss") or 0)
-    change_percent = float(output.get("prdy_ctrt") or 0)
-    if current_value == 0 and change_value == 0 and change_percent == 0:
-        raise RuntimeError(f"Overseas index returned empty values for {definition['symbol']}")
-
-    normalized = {
-        "symbol": definition["symbol"],
-        "label": definition["label"],
-        "source": "KIS_OPEN_API",
-        "market_country": definition["market_country"],
-        "ticker": definition["code"],
-        "current_value": current_value,
-        "change_value": change_value,
-        "change_percent": change_percent,
-        "currency": definition["currency"],
-        "display_order": definition["display_order"],
-        "as_of": datetime.now(timezone.utc).isoformat(),
-        "raw_payload": payload,
-    }
-    _log_collection_stage(
-        "raw",
-        definition["symbol"],
-        {
-            "endpoint": "/uapi/overseas-price/v1/quotations/inquire-time-indexchartprice",
-            "env": definition.get("env"),
-            "params": {
-                "FID_COND_MRKT_DIV_CODE": "N",
-                "FID_INPUT_ISCD": definition["code"],
-                "FID_HOUR_CLS_CODE": "0",
-                "FID_PW_DATA_INCU_YN": "Y",
-            },
-            "response": payload,
-        },
-    )
-    _log_collection_stage("normalized", definition["symbol"], normalized)
-    return normalized
 
 
-def fetch_kis_fx_snapshot(client: KISClient, definition: dict[str, Any]) -> dict[str, Any]:
-    token = client._get_cached_token()
-    response = requests.get(
-        f"{client.base_url}/uapi/overseas-price/v1/quotations/inquire-time-indexchartprice",
-        headers={
-            "content-type": "application/json; charset=utf-8",
-            "authorization": f"Bearer {token}",
-            "appkey": client.appkey,
-            "appsecret": client.appsecret,
-            "tr_id": "FHKST03030200",
-        },
-        params={
-            "FID_COND_MRKT_DIV_CODE": "X",
-            "FID_INPUT_ISCD": definition["code"],
-            "FID_HOUR_CLS_CODE": "0",
-            "FID_PW_DATA_INCU_YN": "Y",
-        },
-        timeout=15,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if payload.get("rt_cd") != "0":
-        raise RuntimeError(payload.get("msg1") or f"FX lookup failed for {definition['symbol']}")
-
-    output = payload.get("output1") or {}
-    current_value = float(output.get("ovrs_nmix_prpr") or 0)
-    change_value = float(output.get("ovrs_nmix_prdy_vrss") or 0)
-    change_percent = float(output.get("prdy_ctrt") or 0)
-    if current_value == 0 and change_value == 0 and change_percent == 0:
-        raise RuntimeError(f"FX returned empty values for {definition['symbol']}")
-
-    normalized = {
-        "symbol": definition["symbol"],
-        "label": definition["label"],
-        "source": "KIS_OPEN_API",
-        "market_country": definition["market_country"],
-        "ticker": definition["code"],
-        "current_value": current_value,
-        "change_value": change_value,
-        "change_percent": change_percent,
-        "currency": definition["currency"],
-        "display_order": definition["display_order"],
-        "as_of": datetime.now(timezone.utc).isoformat(),
-        "raw_payload": payload,
-    }
-    _log_collection_stage(
-        "raw",
-        definition["symbol"],
-        {
-            "endpoint": "/uapi/overseas-price/v1/quotations/inquire-time-indexchartprice",
-            "env": definition.get("env"),
-            "params": {
-                "FID_COND_MRKT_DIV_CODE": "X",
-                "FID_INPUT_ISCD": definition["code"],
-                "FID_HOUR_CLS_CODE": "0",
-                "FID_PW_DATA_INCU_YN": "Y",
-            },
-            "response": payload,
-        },
-    )
-    _log_collection_stage("normalized", definition["symbol"], normalized)
-    return normalized
-
-
-def fetch_kis_index_snapshot(client: KISClient, definition: dict[str, Any]) -> dict[str, Any]:
-    if definition["kind"] == "domestic":
-        return fetch_kis_domestic_index_snapshot(client, definition)
-    if definition["kind"] == "fx":
-        return fetch_kis_fx_snapshot(client, definition)
-    return fetch_kis_overseas_index_snapshot(client, definition)
+def _token_cache_info(client: Any | None) -> dict[str, Any]:
+    if client is None or not hasattr(client, "get_token_cache_info"):
+        return {"cacheStatus": "MISS", "tokenStatus": "REFRESHED", "errorMessage": None}
+    return client.get_token_cache_info()
 
 
 def collect_market_index_rows() -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     rows: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
     clients_by_env: dict[str, KISClient | None] = {}
+    # Toss -> DB 캐시 -> KIS 순서로 안전하게 시도한다.
+    # 1차 수집에 실패해도 2차, 3차 경로가 이어서 동작하도록 설계한 구조다.
+    toss_client = get_toss_market_index_client()
 
     for definition in KIS_INDEX_DEFINITIONS:
+        symbol = definition["symbol"]
+        primary_error: str | None = None
+        fallback_errors: list[str] = []
+
         try:
-            env = definition.get("env", "REAL")
-            if env not in clients_by_env:
-                client = get_kis_market_index_client(env)
-                if client is not None:
-                    # Reuse one access token per env during a single collection pass.
-                    cached_token = client._get_cached_token()
-                    client._get_cached_token = lambda cached_token=cached_token: cached_token
-                clients_by_env[env] = client
-            client = clients_by_env[env]
-            if client is None:
-                raise RuntimeError("KIS market index credentials are not configured.")
-            rows.append(fetch_kis_index_snapshot(client, definition))
+            if toss_client is None:
+                raise RuntimeError("Toss market index credentials are not configured.")
+
+            row = _normalize_market_index_row(toss_client.get_market_index_snapshot(definition), definition)
+            token_info = _token_cache_info(toss_client)
+            diagnostics = _diagnostics(
+                source=row.get("source") or "TOSS_OPEN_API",
+                primary_status="Toss (Success)",
+                fallback_status="NotUsed",
+                cache_status=token_info.get("cacheStatus", "MISS"),
+                token_status=token_info.get("tokenStatus", "REFRESHED"),
+                error_message=None,
+            )
+            row = _attach_diagnostics(row, diagnostics)
+            rows.append(row)
+            _log_market_index_row(row, diagnostics)
+            _log_collection_stage("summary", symbol, diagnostics)
+            continue
         except Exception as error:
-            errors.append({
-                "symbol": definition["symbol"],
-                "message": str(error),
-            })
-            _log_collection_stage("error", definition["symbol"], {"message": str(error)})
+            primary_error = str(error)
+
+        if definition["kind"] == "fx":
+            try:
+                from backend.services.market_index_repository import MarketIndexRepository
+
+                repository = MarketIndexRepository()
+                cached_rows = repository.list_latest() if repository.is_configured else []
+                cached_row = next(
+                    (row for row in cached_rows if str(row.get("symbol") or "").upper() == definition["symbol"]),
+                    None,
+                )
+                if cached_row:
+                    row = _normalize_market_index_row({
+                        "symbol": cached_row.get("symbol"),
+                        "label": cached_row.get("label") or definition["label"],
+                        "source": cached_row.get("source") or "supabase.market_indices_latest",
+                        "market_country": cached_row.get("market_country") or definition["market_country"],
+                        "ticker": cached_row.get("ticker") or "USD/KRW",
+                        "current_price": cached_row.get("current_price") or cached_row.get("current_value"),
+                        "previous_close": cached_row.get("previous_close"),
+                        "change_price": cached_row.get("change_price") or cached_row.get("change_value"),
+                        "change_rate": cached_row.get("change_rate") or cached_row.get("change_percent"),
+                        "currency": cached_row.get("currency") or definition["currency"],
+                        "display_order": cached_row.get("display_order") or definition["display_order"],
+                        "as_of": cached_row.get("synced_at") or cached_row.get("as_of"),
+                        "synced_at": cached_row.get("synced_at") or cached_row.get("as_of"),
+                        "raw_payload": cached_row.get("raw_payload") or {},
+                    }, definition)
+                    diagnostics = _diagnostics(
+                        source=row.get("source") or "supabase.market_indices_latest",
+                        primary_status="Toss Exchange Rate (Failed)",
+                        fallback_status="DB Cache (Success)",
+                        cache_status="HIT",
+                        token_status="REUSED",
+                        error_message=primary_error,
+                    )
+                    row = _attach_diagnostics(row, diagnostics)
+                    rows.append(row)
+                    _log_market_index_row(row, diagnostics)
+                    _log_collection_stage("summary", symbol, diagnostics)
+                    continue
+            except Exception as error:
+                fallback_errors.append(f"DB Cache: {error}")
+
+        if definition["kind"] == "fx":
+            try:
+                fallback_client = clients_by_env.get(definition.get("env", "REAL"))
+                if fallback_client is None:
+                    fallback_client = get_kis_market_index_client(definition.get("env", "REAL"))
+                    clients_by_env[definition.get("env", "REAL")] = fallback_client
+                if fallback_client is None:
+                    raise RuntimeError("KIS market index credentials are not configured.")
+                row = _normalize_market_index_row(fallback_client.get_market_index_snapshot(definition), definition)
+                token_info = _token_cache_info(fallback_client)
+                diagnostics = _diagnostics(
+                    source=row.get("source") or "KIS_OPEN_API",
+                    primary_status="Toss Exchange Rate (Failed)",
+                    fallback_status="KIS (Success)",
+                    cache_status=token_info.get("cacheStatus", "MISS"),
+                    token_status=token_info.get("tokenStatus", "REFRESHED"),
+                    error_message=primary_error,
+                )
+                row = _attach_diagnostics(row, diagnostics)
+                rows.append(row)
+                _log_market_index_row(row, diagnostics)
+                _log_collection_stage("summary", symbol, diagnostics)
+                continue
+            except Exception as error:
+                fallback_errors.append(f"KIS: {error}")
+
+        if definition["kind"] != "fx":
+            try:
+                env = definition.get("env", "REAL")
+                if env not in clients_by_env:
+                    clients_by_env[env] = get_kis_market_index_client(env)
+                client = clients_by_env[env]
+                if client is None:
+                    raise RuntimeError("KIS market index credentials are not configured.")
+                row = _normalize_market_index_row(client.get_market_index_snapshot(definition), definition)
+                token_info = _token_cache_info(client)
+                diagnostics = _diagnostics(
+                    source=row.get("source") or "KIS_OPEN_API",
+                    primary_status="Toss (Failed)",
+                    fallback_status="KIS (Success)",
+                    cache_status=token_info.get("cacheStatus", "MISS"),
+                    token_status=token_info.get("tokenStatus", "REFRESHED"),
+                    error_message=primary_error,
+                )
+                row = _attach_diagnostics(row, diagnostics)
+                rows.append(row)
+                _log_market_index_row(row, diagnostics)
+                _log_collection_stage("summary", symbol, diagnostics)
+            except Exception as error:
+                fallback_errors.append(f"KIS: {error}")
+                message = "; ".join([item for item in [primary_error, *fallback_errors] if item])
+                errors.append({
+                    "symbol": symbol,
+                    "message": message,
+                })
+                diagnostics = _diagnostics(
+                    source="NONE",
+                    primary_status="Toss (Failed)",
+                    fallback_status="KIS (Failed)",
+                    cache_status="MISS",
+                    token_status="REFRESHED",
+                    error_message=message,
+                )
+                _log_collection_stage("error", symbol, diagnostics)
 
     return rows, errors
 
@@ -362,6 +446,7 @@ def serialize_market_index_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     stale_seconds = MARKET_INDEX_OPEN_STALE_SECONDS if open_market else MARKET_INDEX_CLOSED_STALE_SECONDS
 
     items: list[dict[str, Any]] = []
+    diagnostics: list[dict[str, Any]] = []
     latest_updated_at: datetime | None = None
 
     for row in rows:
@@ -373,16 +458,46 @@ def serialize_market_index_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if as_of:
             age_seconds = (datetime.now(timezone.utc) - as_of.astimezone(timezone.utc)).total_seconds()
 
-        change_value = float(row.get("change_value") or 0)
+        raw_payload = row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {}
+        row_diagnostics = raw_payload.get("diagnostics")
+        if isinstance(row_diagnostics, dict):
+            diagnostics.append({"symbol": row.get("symbol"), **row_diagnostics})
+
+        current_price = float(row.get("current_price") or row.get("current_value") or 0)
+        previous_close = float(row.get("previous_close") or 0)
+        change_price, change_rate = _resolve_change_rate(
+            current_price=current_price,
+            previous_close=previous_close,
+            change_price=row.get("change_price") or row.get("change_value"),
+            change_rate=row.get("change_rate") or row.get("change_percent"),
+        )
+        synced_at = row.get("synced_at") or row.get("as_of")
+        # 프론트와 기존 DB 스키마가 같이 읽을 수 있도록 신/구 필드를 함께 내려준다.
+        # 이 단계에서 한번 맞춰두면 화면과 저장소 양쪽의 분기 코드가 줄어든다.
         items.append({
             "key": row.get("symbol"),
-            "label": row.get("label") or row.get("symbol"),
-            "value": float(row.get("current_value") or 0),
-            "change": change_value,
-            "changePercent": float(row.get("change_percent") or 0),
-            "direction": "up" if change_value > 0 else "down" if change_value < 0 else "flat",
-            "updatedAt": row.get("as_of"),
+            "label": _canonical_market_label(row.get("symbol"), row.get("label") or row.get("symbol")),
+            "value": current_price,
+            "currentPrice": current_price,
+            "current_price": current_price,
+            "previousClose": previous_close,
+            "previous_close": previous_close,
+            "change": change_price,
+            "changePrice": change_price,
+            "change_price": change_price,
+            "changePercent": change_rate,
+            "changeRate": change_rate,
+            "change_rate": change_rate,
+            "direction": "up" if change_price > 0 else "down" if change_price < 0 else "flat",
+            "updatedAt": synced_at,
+            "syncedAt": synced_at,
             "currency": row.get("currency") or "USD",
+            "source": row.get("source") or "UNKNOWN",
+            "primaryStatus": row_diagnostics.get("primaryStatus") if isinstance(row_diagnostics, dict) else None,
+            "fallbackStatus": row_diagnostics.get("fallbackStatus") if isinstance(row_diagnostics, dict) else None,
+            "cacheStatus": row_diagnostics.get("cacheStatus") if isinstance(row_diagnostics, dict) else None,
+            "tokenStatus": row_diagnostics.get("tokenStatus") if isinstance(row_diagnostics, dict) else None,
+            "errorMessage": row_diagnostics.get("errorMessage") if isinstance(row_diagnostics, dict) else None,
             "stale": bool(age_seconds is None or age_seconds > stale_seconds),
         })
 
@@ -390,6 +505,7 @@ def serialize_market_index_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "items": items,
         "fetchedAt": latest_updated_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z") if latest_updated_at else None,
         "source": "supabase.market_indices_latest",
+        "diagnostics": diagnostics,
     }
 
 
@@ -407,5 +523,4 @@ def market_index_rows_need_refresh(rows: list[dict[str, Any]]) -> bool:
     if not items:
         return True
 
-    # If any configured index is stale, refresh from KIS before responding.
     return any(bool(item.get("stale")) for item in items)

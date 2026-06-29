@@ -8,27 +8,17 @@ const INDEX_LABELS = {
   USDKRW: 'USD/KRW',
   KOSPI: 'KOSPI',
   KOSDAQ: 'KOSDAQ',
-  NASDAQ100_F: 'NASDAQ 100',
+  NASDAQ100_F: '나스닥 100 선물',
   SP500: 'S&P 500',
 }
 
-function formatValue(value, currency) {
+function formatValue(value) {
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) return '-'
 
-  let minimumFractionDigits = 2
-
-  if (currency === 'KRW' && numeric >= 100) {
-    minimumFractionDigits = 0
-  }
-
-  if (currency === 'KRW' && numeric < 2000) {
-    minimumFractionDigits = 2
-  }
-
   return numeric.toLocaleString('ko-KR', {
-    minimumFractionDigits,
-    maximumFractionDigits: minimumFractionDigits,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   })
 }
 
@@ -59,6 +49,8 @@ function getDisplayItems(items) {
   const byKey = new Map(items.map((item) => [item.key, item]))
 
   // We only surface the KIS-backed feeds that are wired into the market index store.
+  // 프론트는 서버가 내려주는 여러 필드 이름을 한 번에 흡수해서 표시만 책임진다.
+  // 즉, API 응답 구조가 조금 바뀌어도 이 컴포넌트는 가능한 한 그대로 유지되도록 한다.
   return ALLOWED_INDEX_KEYS
     .map((key) => {
       const item = byKey.get(key)
@@ -66,6 +58,9 @@ function getDisplayItems(items) {
       return {
         ...item,
         label: INDEX_LABELS[key] || item.label || key,
+        currentPrice: item.currentPrice ?? item.current_price ?? item.value,
+        changePrice: item.changePrice ?? item.change_price ?? item.change,
+        changeRate: item.changeRate ?? item.changePercent ?? item.change_rate ?? item.change_percent,
       }
     })
     .filter(Boolean)
@@ -77,6 +72,16 @@ export default function GlobalIndexTickerBar() {
 
   useEffect(() => {
     let disposed = false
+    let timeoutId = null
+    let retryCount = 0
+
+    const scheduleNext = (delayMs) => {
+      if (disposed) return
+      if (timeoutId) {
+        window.clearTimeout(timeoutId)
+      }
+      timeoutId = window.setTimeout(loadIndices, delayMs)
+    }
 
     const loadIndices = async () => {
       try {
@@ -95,20 +100,26 @@ export default function GlobalIndexTickerBar() {
           const nextItems = Array.isArray(payload.data?.items) ? payload.data.items : []
           setItems(getDisplayItems(nextItems))
           setErrorMessage('')
+          retryCount = 0
+          scheduleNext(REFRESH_INTERVAL_MS)
         }
       } catch (error) {
         if (!disposed) {
           setErrorMessage(error.message || '지수 데이터를 불러오지 못했습니다.')
+          retryCount += 1
+          const backoffMs = Math.min(REFRESH_INTERVAL_MS * retryCount, 5 * 60 * 1000)
+          scheduleNext(backoffMs)
         }
       }
     }
 
     loadIndices()
-    const intervalId = window.setInterval(loadIndices, REFRESH_INTERVAL_MS)
 
     return () => {
       disposed = true
-      window.clearInterval(intervalId)
+      if (timeoutId) {
+        window.clearTimeout(timeoutId)
+      }
     }
   }, [])
 
@@ -134,11 +145,11 @@ export default function GlobalIndexTickerBar() {
                   {item.label}
                 </span>
                 <span className="whitespace-nowrap font-semibold text-slate-100">
-                  {formatValue(item.value, item.currency)}
+                  {formatValue(item.currentPrice)}
                 </span>
               </div>
               <span className={`whitespace-nowrap text-xs font-bold ${changeClass(item.direction)}`}>
-                {formatDelta(item.change)} ({formatPercent(item.changePercent)})
+                {formatDelta(item.changePrice)} ({formatPercent(item.changeRate)})
               </span>
             </div>
           ))}

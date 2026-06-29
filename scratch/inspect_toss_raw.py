@@ -41,14 +41,18 @@ def run():
         env="REAL"
     )
     
-    token = client._get_cached_token()
+    # 토큰 조회 세부사항은 클라이언트에 맡기고, 여기서는 바로 API 호출만 한다.
+    # 실험 스크립트는 로직 검증보다 실제 응답 확인에 집중하는 편이 안전하다.
+    token = client.get_access_token()
     headers = {
         "Authorization": f"Bearer {token}",
         "X-Tossinvest-Account": str(account_seq)
     }
     
     # holdings API 호출 및 raw 데이터 가져오기
-    token = client._get_cached_token()
+    # 홀딩스 조회도 같은 토큰 재사용 경로를 따른다.
+    # 같은 세션에서 반복 호출할 때 캐시 경로가 정상인지 같이 확인할 수 있다.
+    token = client.get_access_token()
     url = f"{client.base_url}/api/v1/holdings"
     headers = {
         "Authorization": f"Bearer {token}",

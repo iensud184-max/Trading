@@ -55,8 +55,10 @@ function formatPrice(row) {
 }
 
 function formatChange(row) {
+  // 서버 응답이 새/구 필드를 섞어서 내려줘도 같은 화면 포맷으로 보이게 맞춘다.
+  // 숫자 표기 방식이 달라도 사용자는 한 가지 스타일로만 보게 하는 게 목적이다.
   if (typeof row.change === "string" && row.change) return row.change;
-  const change = Number(row.change_rate ?? row.live_change_rate);
+  const change = Number(row.change_rate ?? row.changeRate ?? row.change_percent ?? row.changePercent ?? row.live_change_rate);
   if (!Number.isFinite(change)) return "-";
   return `${change > 0 ? "+" : ""}${change.toFixed(2)}%`;
 }
@@ -75,7 +77,9 @@ function formatValue(row, valueKey) {
 }
 
 function numericChange(row) {
-  const raw = row.change_rate ?? row.live_change_rate ?? row.change;
+  // 정렬용 값도 표시용 값과 같은 우선순위를 따라가야 사용자 눈에 일관된다.
+  // 화면에는 같은 종목이 같은 기준으로 정렬되어 보여야 혼란이 없다.
+  const raw = row.change_rate ?? row.changeRate ?? row.change_percent ?? row.changePercent ?? row.live_change_rate ?? row.change;
   const value = Number(String(raw ?? "").replace("%", "").replace("+", ""));
   return Number.isFinite(value) ? value : 0;
 }

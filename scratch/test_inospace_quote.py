@@ -26,7 +26,9 @@ def main():
     print(f"TossClient 초기화 진행 (TOSS_API_KEY={client_id[:10]}...)")
     import requests
     client = TossClient(client_id=client_id, client_secret=client_secret, env="REAL")
-    token = client._get_cached_token()
+    # 토큰은 클라이언트의 캐시/재발급 로직을 그대로 사용한다.
+    # 이렇게 해야 실제 서비스에서 쓰는 경로와 같은 조건으로 테스트할 수 있다.
+    token = client.get_access_token()
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"

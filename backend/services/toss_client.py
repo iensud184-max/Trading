@@ -36,6 +36,13 @@ class TossClient(ExchangeClient):
         self.env = env.upper()
         self.base_url = "https://openapi.tossinvest.com"
         self.user_id = user_id
+        # 토큰 캐시 상태를 마지막 호출 결과와 함께 보관한다.
+        self._last_token_cache_info = {
+            "source": "token_cache_service",
+            "cacheStatus": "MISS",
+            "tokenStatus": "REFRESHED",
+            "errorMessage": None,
+        }
 
     def _send_request(self, method: str, url: str, **kwargs) -> requests.Response:
         """
@@ -176,20 +183,32 @@ class TossClient(ExchangeClient):
         except Exception:
             pass
 
+    def get_token_cache_info(self) -> dict:
+        return dict(self._last_token_cache_info)
+
+    def get_access_token(self) -> str:
+        # 외부 호출부는 이 메서드만 사용하면 토큰 갱신 세부사항을 몰라도 된다.
+        return self._get_cached_token()
+
     def _get_cached_token(self) -> str:
         """
         Supabase DB의 token_caches 테이블에서 토스 Access Token을 가져옵니다.
         토큰이 만료되었거나 캐시가 없으면 새로 발급을 요청합니다.
         """
-        from backend.services.token_cache_service import get_db_token, set_db_token
+        from backend.services.token_cache_service import get_db_token_with_status, set_db_token
         
         # DB에서 유효한 공용 토큰 획득 시도
-        try:
-            token = get_db_token("TOSS", self.env, self.user_id)
-            if token:
-                return token
-        except Exception:
-            pass
+        cache_state = get_db_token_with_status("TOSS", self.env, self.user_id)
+        self._last_token_cache_info = {
+            "source": "token_cache_service",
+            "cacheStatus": cache_state.get("cache_status", "MISS"),
+            "tokenStatus": cache_state.get("token_status", "REFRESHED"),
+            "errorMessage": cache_state.get("error_message"),
+            "expiredAt": cache_state.get("expired_at"),
+        }
+        token = cache_state.get("token")
+        if token:
+            return token
 
         # 토큰 새로 발급
         token_data = self._request_new_token()
@@ -201,6 +220,13 @@ class TossClient(ExchangeClient):
             set_db_token("TOSS", self.env, new_token, expires_in, self.user_id)
         except Exception:
             pass
+        self._last_token_cache_info = {
+            "source": "token_cache_service",
+            "cacheStatus": "MISS",
+            "tokenStatus": "REFRESHED",
+            "errorMessage": cache_state.get("error_message"),
+            "expiredAt": (datetime.utcnow() + timedelta(seconds=expires_in)).isoformat() + "Z",
+        }
 
         return new_token
 
@@ -228,6 +254,248 @@ class TossClient(ExchangeClient):
             err_msg = err_data.get("error_description") or err_data.get("error") or res.text
             raise Exception(f"토스 토큰 발급 실패: {err_msg}")
         return res.json()
+
+    def _market_index_symbol(self, definition: dict) -> str:
+        # Toss API가 요구하는 심볼 표기와 내부 심볼 표기를 맞춘다.
+        return {
+            "USDKRW": "USDKRW",
+            "KOSPI": "KOSPI",
+            "KOSDAQ": "KOSDAQ",
+            "NASDAQ100_F": "NDX",
+            "SP500": "SPX",
+        }.get(definition["symbol"], definition.get("code") or definition["symbol"])
+
+    def _fetch_price_payload(self, symbol: str) -> dict:
+        # price 엔드포인트와 복수형 파라미터를 모두 시도해 응답 차이를 흡수한다.
+        url = f"{self.base_url}/api/v1/prices"
+        headers = {
+            "Authorization": f"Bearer {self._get_cached_token()}",
+            "Content-Type": "application/json",
+        }
+        response = self._send_request("GET", url, headers=headers, params={"symbol": symbol}, timeout=15)
+        if response.status_code != 200:
+            response = self._send_request("GET", url, headers=headers, params={"symbols": symbol}, timeout=15)
+        if response.status_code != 200:
+            raise RuntimeError(f"Toss price lookup failed for {symbol}: {response.text}")
+
+        payload = response.json()
+        if isinstance(payload, dict) and payload.get("error"):
+            err = payload["error"]
+            raise RuntimeError(f"Toss price lookup failed for {symbol}: {err.get('message') or err}")
+
+        result = payload.get("result", {})
+        if not result or not isinstance(result, dict):
+            for key in ("output", "data"):
+                if isinstance(payload, dict) and payload.get(key):
+                    result = payload.get(key)
+                    break
+        if isinstance(result, list):
+            result = result[0] if result else {}
+        if not isinstance(result, dict):
+            result = {}
+
+        current_price = float(
+            result.get("currentPrice")
+            or result.get("current_price")
+            or result.get("closePrice")
+            or result.get("close_price")
+            or result.get("price")
+            or result.get("lastPrice")
+            or result.get("last_price")
+            or 0.0
+        )
+        return {
+            "current_price": current_price,
+            "result": result,
+            "raw": payload,
+        }
+
+    def _get_daily_previous_close(self, symbol: str, count: int = 5) -> dict:
+        # 일봉 데이터에서 오늘 봉이 있으면 바로 직전 봉을 전일 종가로 계산한다.
+        candles = self.get_candles(symbol, interval="1d", count=count)
+        if not candles:
+            return {
+                "previous_close": 0.0,
+                "candles": [],
+                "selected_index": None,
+                "today_candle_included": False,
+            }
+
+        today_kst = datetime.now(KST).date().isoformat()
+        normalized = []
+        for candle in candles:
+            candle_time = candle.get("time")
+            candle_date = str(candle_time).split(" ")[0] if candle_time is not None else ""
+            normalized.append({**candle, "date": candle_date})
+
+        today_index = None
+        for index in range(len(normalized) - 1, -1, -1):
+            if normalized[index].get("date") == today_kst:
+                today_index = index
+                break
+
+        # 오늘 봉이 있으면 직전 봉을 전일 종가로 쓰고, 없으면 마지막 봉을 전일 종가로 사용한다.
+        if today_index is not None and today_index > 0:
+            selected_index = today_index - 1
+            today_candle_included = True
+        else:
+            selected_index = len(normalized) - 1
+            today_candle_included = False
+
+        selected = normalized[selected_index] if 0 <= selected_index < len(normalized) else normalized[-1]
+        return {
+            "previous_close": float(selected.get("close") or 0.0),
+            "candles": normalized,
+            "selected_index": selected_index,
+            "today_candle_included": today_candle_included,
+        }
+
+    def _build_standard_market_index_row(self, definition: dict, symbol: str, current_price: float, previous_close: float, payload: dict, source: str, token_info: dict | None = None) -> dict:
+        # 백엔드/프론트/DB가 같은 필드 세트를 보도록 공통 응답 형태로 정규화한다.
+        change_price = current_price - previous_close if previous_close else 0.0
+        change_rate = ((change_price / previous_close) * 100) if previous_close else 0.0
+        synced_at = datetime.now(timezone.utc).isoformat()
+        raw_payload = payload if isinstance(payload, dict) else {"payload": payload}
+        if token_info:
+            raw_payload = {**raw_payload, "tokenInfo": token_info}
+        return {
+            "symbol": definition["symbol"],
+            "label": definition["label"],
+            "source": source,
+            "market_country": definition["market_country"],
+            "ticker": symbol,
+            "current_price": current_price,
+            "previous_close": previous_close,
+            "change_price": change_price,
+            "change_rate": change_rate,
+            "current_value": current_price,
+            "change_value": change_price,
+            "change_percent": change_rate,
+            "currency": definition["currency"],
+            "display_order": definition["display_order"],
+            "as_of": synced_at,
+            "synced_at": synced_at,
+            "raw_payload": raw_payload,
+        }
+
+    def get_market_index_snapshot(self, definition: dict) -> dict:
+        if definition["kind"] == "fx":
+            return self._get_exchange_rate_snapshot(definition)
+
+        symbol = self._market_index_symbol(definition)
+        quote = self._fetch_price_payload(symbol)
+        candle_info = self._get_daily_previous_close(symbol)
+        current_price = float(quote.get("current_price") or 0.0)
+        previous_close = float(candle_info.get("previous_close") or 0.0)
+        if not current_price:
+            raise RuntimeError(f"Toss index lookup returned empty value for {definition['symbol']}")
+
+        return self._build_standard_market_index_row(
+            definition,
+            symbol,
+            current_price,
+            previous_close,
+            {
+                "quote": quote.get("raw") or {},
+                "candles": candle_info.get("candles") or [],
+                "candleSelection": candle_info,
+            },
+            source="TOSS_OPEN_API",
+            token_info=self.get_token_cache_info(),
+        )
+
+    def _get_exchange_rate_snapshot(self, definition: dict) -> dict:
+        # 환율은 별도 API로 가져오되, 응답이 비면 전일 종가 기준값으로도 구성한다.
+        token = self._get_exchange_rate_bearer_token()
+        response = requests.get(
+            f"{self.base_url}/api/v1/exchange-rate",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            params={
+                "baseCurrency": "USD",
+                "quoteCurrency": "KRW",
+            },
+            timeout=15,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"Toss exchange rate failed: {response.text}")
+
+        payload = response.json()
+        result = payload.get("result", {})
+        rate = result.get("rate") or result.get("basePrice") or result.get("exchangeRate") or result.get("price")
+        if not rate:
+            raise RuntimeError("Toss exchange rate returned empty payload")
+
+        candle_info = self._get_daily_previous_close("USDKRW")
+        current_price = float(rate)
+        previous_close = float(candle_info.get("previous_close") or 0.0)
+        return self._build_standard_market_index_row(
+            definition,
+            "USDKRW",
+            current_price,
+            previous_close,
+            {
+                "quote": payload,
+                "rate": result.get("rate"),
+                "midRate": result.get("midRate"),
+                "basisPoint": result.get("basisPoint"),
+                "rateChangeType": result.get("rateChangeType"),
+                "validFrom": result.get("validFrom"),
+                "validUntil": result.get("validUntil"),
+                "candles": candle_info.get("candles") or [],
+                "candleSelection": candle_info,
+            },
+            source="TOSS_EXCHANGE_RATE",
+            token_info=self.get_token_cache_info(),
+        )
+
+    def _get_exchange_rate_bearer_token(self) -> str:
+        secret_token = os.getenv("TOSS_SECRET_TOKEN", "")
+        if not secret_token:
+            raise RuntimeError("TOSS_SECRET_TOKEN is not configured.")
+
+        # 환율 조회는 별도 고정 토큰을 쓰므로 캐시 상태도 그에 맞게 기록한다.
+        self._last_token_cache_info = {
+            "source": "TOSS_EXCHANGE_RATE",
+            "cacheStatus": "HIT",
+            "tokenStatus": "REUSED",
+            "errorMessage": None,
+            "expiredAt": None,
+        }
+        return secret_token
+
+    def _build_market_index_row(
+        self,
+        definition: dict,
+        ticker: str,
+        current_value: float,
+        change_value: float,
+        change_percent: float,
+        payload: dict,
+        source: str = "TOSS_OPEN_API",
+    ) -> dict:
+        synced_at = datetime.now(timezone.utc).isoformat()
+        return {
+            "symbol": definition["symbol"],
+            "label": definition["label"],
+            "source": source,
+            "market_country": definition["market_country"],
+            "ticker": ticker,
+            "current_value": current_value,
+            "current_price": current_value,
+            "previous_close": current_value - change_value if change_value else 0.0,
+            "change_value": change_value,
+            "change_price": change_value,
+            "change_percent": change_percent,
+            "change_rate": change_percent,
+            "currency": definition["currency"],
+            "display_order": definition["display_order"],
+            "as_of": synced_at,
+            "synced_at": synced_at,
+            "raw_payload": payload,
+        }
 
     def _get_accounts_impl(self) -> list:
         token = self._get_cached_token()
@@ -723,23 +991,44 @@ class TossClient(ExchangeClient):
         return self.get_candles(symbol, interval="1d", count=count)
 
     def _get_exchange_rate_impl(self) -> float:
-        token = self._get_cached_token()
-        url = f"{self.base_url}/api/v1/exchange-rate"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
-        }
-        params = {
-            "baseCurrency": "USD",
-            "quoteCurrency": "KRW"
-        }
-        res = self._send_request("GET", url, headers=headers, params=params)
-        if res.status_code == 200:
-            data = res.json()
-            result = data.get("result", {})
-            rate = result.get("rate") or result.get("basePrice") or result.get("exchangeRate") or result.get("price")
-            if rate:
-                return float(rate)
+        try:
+            token = self._get_exchange_rate_bearer_token()
+            res = requests.get(
+                f"{self.base_url}/api/v1/exchange-rate",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                params={
+                    "baseCurrency": "USD",
+                    "quoteCurrency": "KRW",
+                },
+                timeout=15,
+            )
+            if res.status_code == 200:
+                data = res.json()
+                result = data.get("result", {})
+                rate = result.get("rate")
+                if rate:
+                    return float(rate)
+        except Exception as error:
+            logger.warning(f"[Toss Client] exchange-rate request failed: {error}")
+
+        try:
+            # 실시간 환율이 실패하면 저장된 지수 캐시에서 USD/KRW를 마지막 대안으로 읽는다.
+            from backend.services.market_index_repository import MarketIndexRepository
+
+            repository = MarketIndexRepository()
+            rows = repository.list_latest()
+            for row in rows or []:
+                if str(row.get("symbol") or "").upper() == "USDKRW":
+                    cached_rate = float(row.get("current_price") or row.get("current_value") or 0)
+                    if cached_rate > 0:
+                        logger.info("[Toss Client] exchange-rate fallback from DB cache")
+                        return cached_rate
+        except Exception as error:
+            logger.warning(f"[Toss Client] exchange-rate DB fallback failed: {error}")
+
         return 1500.0
 
     def get_exchange_rate(self) -> float:

@@ -54,13 +54,12 @@ const getTrendPointValue = (item) => toNumber(item?.total_evaluation ?? item?.va
 const getTrendPointTime = (item) => item?.snapshot_at || item?.snapshot_date || item?.date || ''
 
 const buildCurrentBalanceTrend = (currentValue, periodKey) => {
-  const pointCount = periodKey === '1h' ? 6 : periodKey === '1d' ? 8 : periodKey === '1w' ? 7 : 8
-  return Array.from({ length: pointCount }, () => toNumber(currentValue))
+  return Array.from({ length: 6 }, () => toNumber(currentValue))
 }
 
 const buildFallbackTrendLabels = (periodKey) => {
   const now = new Date()
-  const count = periodKey === '1h' ? 6 : periodKey === '1d' ? 8 : periodKey === '1w' ? 7 : 8
+  const count = 6
   const stepMs = periodKey === '1h'
     ? 10 * 60 * 1000
     : periodKey === '1d'
@@ -114,7 +113,50 @@ const formatTrendDelta = (values, displayCurrency = 'KRW', exchangeRate = 1500) 
   if (!values.length) return '+0'
   const delta = values[values.length - 1] - values[0]
   const formatted = formatCurrency(Math.abs(delta), 'KRW', displayCurrency, exchangeRate)
-  return `${delta >= 0 ? '+' : '-'}${formatted}`
+  if (delta === 0) return formatted
+  return `${delta > 0 ? '+' : '-'}${formatted}`
+}
+
+const getTrendDeltaTone = (values) => {
+  if (!values.length) return 'text-white'
+  const delta = values[values.length - 1] - values[0]
+  if (delta > 0) return 'text-red-400'
+  if (delta < 0) return 'text-blue-400'
+  return 'text-white'
+}
+
+const getHoldingMarketType = (holding = {}) => {
+  const symbol = String(holding.symbol || holding.ticker || holding.id || '').toUpperCase()
+  const exchange = String(holding.exchange || holding.raw_exchange || '').toUpperCase()
+  const accountType = String(holding.account || holding.account_type || '').toUpperCase()
+  const assetType = String(holding.asset_type || '').toUpperCase()
+  const market = String(holding.market || holding.market_country || '').toUpperCase()
+  const currency = String(holding.currency || '').toUpperCase()
+  const combined = `${symbol} ${exchange} ${accountType} ${assetType} ${market} ${currency}`
+
+  if (/CRYPTO|COIN|COINONE|BINANCE|BTC|ETH|XRP|SOL|USDT|코인/.test(combined)) {
+    return 'coin'
+  }
+
+  if (/OVERSEAS|FOREIGN|GLOBAL|NASDAQ|NYSE|AMEX|US|USD|해외/.test(combined)) {
+    return 'overseas'
+  }
+
+  if (/DOMESTIC|KR|KRW|KOSPI|KOSDAQ|국내/.test(combined) || /^\d{6}$/.test(symbol)) {
+    return 'domestic'
+  }
+
+  return /[A-Z]/.test(symbol) ? 'overseas' : 'domestic'
+}
+
+const getHoldingEvaluationKrw = (holding = {}, exchangeRate = 1500) => {
+  const currency = String(holding.currency || '').toUpperCase()
+  const rate = toNumber(exchangeRate) || 1500
+  const rawValue = toNumber(holding.eval_amount) > 0
+    ? toNumber(holding.eval_amount)
+    : toNumber(holding.current_price) * toNumber(holding.qty)
+
+  return currency === 'USD' || currency === 'USDT' ? rawValue * rate : rawValue
 }
 
 const getPortfolioProfitRate = (accountBalance) => {
@@ -186,6 +228,33 @@ const mergeAccountBalances = (items, showMockAssets = true) => {
     sources: filteredItems.map((item) => item.exchange),
   }
 }
+
+const getBalanceRequestLabel = (exchange, env) => {
+  if (exchange === 'KIS') {
+    return `KIS ${env === 'REAL' ? '실전' : '모의'}`
+  }
+
+  return exchange
+}
+
+const buildBalanceRequests = (keyStatus) =>
+  BALANCE_EXCHANGE_ORDER.flatMap((exchange) => {
+    const status = keyStatus[exchange]
+    if (!status?.registered) return []
+
+    const accounts = Array.isArray(status.accounts) && status.accounts.length > 0
+      ? status.accounts
+      : [status]
+
+    return accounts.map((account) => {
+      const env = String(account?.broker_env || status.broker_env || (exchange === 'KIS' ? 'MOCK' : 'REAL')).toUpperCase()
+      return {
+        exchange,
+        env,
+        label: getBalanceRequestLabel(exchange, env),
+      }
+    })
+  })
 
 export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userProfile }) {
   const [inputs, setInputs] = useState({
@@ -301,17 +370,16 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
       }
 
       const keyStatus = statusPayload.data || {}
-      const registeredExchanges = BALANCE_EXCHANGE_ORDER.filter((exchange) => keyStatus[exchange]?.registered)
+      const balanceRequests = buildBalanceRequests(keyStatus)
 
-      if (registeredExchanges.length === 0) {
+      if (balanceRequests.length === 0) {
         setBalance({ total_evaluation: 0, available_cash: 0, holdings: [], sources: [] })
         setBalanceError('등록된 거래소 API 키가 없습니다.')
         return
       }
 
       const results = await Promise.all(
-        registeredExchanges.map(async (exchange) => {
-          const env = keyStatus[exchange]?.broker_env || (exchange === 'KIS' ? 'MOCK' : 'REAL')
+        balanceRequests.map(async ({ exchange, env, label }) => {
           try {
             const response = await fetch(`${DASHBOARD_API_BASE_URL}/api/dashboard/balance`, {
               method: 'POST',
@@ -325,16 +393,17 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
 
             if (!response.ok || !payload.success) {
               return {
-                exchange,
+                exchange: label,
                 env,
                 error: payload.message || `${exchange} 잔고 조회 실패`,
               }
             }
 
-            return { ...payload.data, exchange, env }
+            return { ...payload.data, exchange: label, raw_exchange: exchange, env }
           } catch (error) {
             return {
-              exchange,
+              exchange: label,
+              env,
               error: error.message || `${exchange} 잔고 조회 실패`,
             }
           }
@@ -469,8 +538,8 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
       const symbol = String(stock.symbol || '').toUpperCase()
       const accountType = String(stock.account || stock.account_type || stock.asset_type || stock.exchange || '').toUpperCase()
       const isCoin = /BTC|ETH|XRP|SOL|USDT|KRW|COINONE|BINANCE|CRYPTO|코인/.test(`${symbol} ${accountType}`)
-      const isOverseas = /[A-Z]/.test(symbol) && !isCoin
-      const stockEval = toNumber(stock.current_price) * toNumber(stock.qty)
+      const isOverseas = getHoldingMarketType(stock) === 'overseas' && !isCoin
+      const stockEval = getHoldingEvaluationKrw(stock, balance.exchange_rate)
 
       if (isCoin) {
         coinValue += stockEval
@@ -540,6 +609,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
     ? `${assetDateRange.start || '시작일'} ~ ${assetDateRange.end || '종료일'}`
     : `현재 계정 자산 기준 · ${assetDateRange.start || '시작일'} ~ ${assetDateRange.end || '종료일'}`
   const assetTrendDelta = formatTrendDelta(assetTrendValues, displayCurrency, balance?.exchange_rate)
+  const assetTrendDeltaTone = getTrendDeltaTone(assetTrendValues)
 
   const handleAssetPeriodChange = (periodKey) => {
     setSelectedAssetPeriod(periodKey)
@@ -699,7 +769,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                     <div>
                       <p className="text-2xl font-bold text-white font-mono">{balanceLoading ? '조회 중' : formatCurrency(balance?.total_evaluation, balance?.currency, 'KRW', balance?.exchange_rate)}</p>
                       <p className="text-[11px] text-slate-400 mt-1">
-                        {assetTrendSummary} <span className="text-emerald-400 font-bold font-mono">{assetTrendDelta}</span>
+                        {assetTrendSummary} <span className={`${assetTrendDeltaTone} font-bold font-mono`}>{assetTrendDelta}</span>
                       </p>
                     </div>
                     <div className="flex gap-1.5 text-[10px] font-bold text-slate-400">
@@ -737,7 +807,11 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                     </div>
                   ) : null}
                   <div className="mt-2 rounded border border-slate-800 bg-[#0f172a]/60 p-4">
-                    <Sparkline values={displayTrendValues} labels={assetTrendLabels} />
+                    <Sparkline
+                      values={displayTrendValues}
+                      labels={assetTrendLabels}
+                      formatValue={(value) => formatCurrency(value, displayCurrency, displayCurrency, balance?.exchange_rate)}
+                    />
                     <div className="mt-3 flex items-center justify-between text-[10px] font-bold text-slate-500">
                       <span>
                         {assetTrendLoading
@@ -900,8 +974,8 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                               <td className="py-3 px-3 text-right text-slate-100">
                                 {formatCurrency(stock.current_price, stockCurrency, currentDisplayCurrency, exchangeRate)}
                               </td>
-                              <td className={`py-3 px-3 text-right font-semibold ${stock.profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                {stock.profit >= 0 ? '+' : ''}{formatCurrency(stock.profit, stockCurrency, currentDisplayCurrency, exchangeRate)}
+                              <td className={`py-3 px-3 text-right font-semibold ${stock.profit > 0 ? 'text-red-400' : stock.profit < 0 ? 'text-blue-400' : 'text-white'}`}>
+                                {stock.profit > 0 ? '+' : ''}{formatCurrency(stock.profit, stockCurrency, currentDisplayCurrency, exchangeRate)}
                               </td>
                               <td className={`py-3 px-3 text-right font-semibold`}>
                                 <Rate value={(stock.profit_rate >= 0 ? '+' : '') + stock.profit_rate.toFixed(2) + '%'} />

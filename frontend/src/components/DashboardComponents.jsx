@@ -1,38 +1,99 @@
+import { useState } from 'react'
 import { DASHBOARD_TABS } from '../dashboardConstants.js'
 
 function Rate({ value }) {
-  if (!value) return <span className="text-slate-400">0.00%</span>;
+  if (!value) return <span className="font-mono font-semibold text-white">0.00%</span>
   const isPositive = value.startsWith('+');
   const isNegative = value.startsWith('-');
+  const tone = isPositive ? 'text-red-400' : isNegative ? 'text-blue-400' : 'text-white'
   return (
-    <span className={`font-mono font-semibold ${isPositive ? 'text-emerald-400' : isNegative ? 'text-red-400' : 'text-slate-400'}`}>
+    <span className={`font-mono font-semibold ${tone}`}>
       {value}
     </span>
   )
 }
 
-function Sparkline({ values = [], labels = [] }) {
-  const safeValues = values.length ? values : [0, 0]
+const getEvenIndexes = (length, maxCount = 6) => {
+  if (length <= 0) return []
+  if (length <= maxCount) return Array.from({ length }, (_, index) => index)
+
+  return Array.from({ length: maxCount }, (_, index) =>
+    Math.round((index / Math.max(maxCount - 1, 1)) * (length - 1)),
+  ).filter((index, itemIndex, items) => items.indexOf(index) === itemIndex)
+}
+
+const buildMinimumSeries = (values = [], labels = [], minCount = 6) => {
+  const sourceValues = values.length ? values : [0]
+  const sourceLabels = labels.length ? labels : sourceValues.map(() => '')
+
+  if (sourceValues.length >= minCount) {
+    return { values: sourceValues, labels: sourceLabels }
+  }
+
+  const lastValueIndex = Math.max(sourceValues.length - 1, 0)
+  const displayValues = Array.from({ length: minCount }, (_, index) => {
+    if (sourceValues.length === 1) return sourceValues[0]
+
+    const position = (index / Math.max(minCount - 1, 1)) * lastValueIndex
+    const lowerIndex = Math.floor(position)
+    const upperIndex = Math.min(lastValueIndex, Math.ceil(position))
+    const ratio = position - lowerIndex
+    const lowerValue = sourceValues[lowerIndex]
+    const upperValue = sourceValues[upperIndex]
+    return lowerValue + (upperValue - lowerValue) * ratio
+  })
+
+  const displayLabels = Array.from({ length: minCount }, (_, index) => {
+    if (sourceLabels.length === 1) return index === 0 || index === minCount - 1 ? sourceLabels[0] : ''
+    const sourceIndex = Math.round((index / Math.max(minCount - 1, 1)) * Math.max(sourceLabels.length - 1, 0))
+    return sourceLabels[sourceIndex] || ''
+  })
+
+  return { values: displayValues, labels: displayLabels }
+}
+
+function Sparkline({ values = [], labels = [], formatValue }) {
+  const [hoverIndex, setHoverIndex] = useState(null)
+  const { values: safeValues, labels: axisLabels } = buildMinimumSeries(values, labels, 6)
   const min = Math.min(...safeValues)
   const max = Math.max(...safeValues)
   const range = Math.max(max - min, 1)
-  const points = safeValues
+  const chartPoints = safeValues
     .map((val, index) => {
       const x = (index / Math.max(safeValues.length - 1, 1)) * 100
       const y = 52 - ((val - min) / range) * 46
-      return `${x},${y}`
+      return { value: val, x, y }
     })
+  const points = chartPoints
+    .map((point) => `${point.x},${point.y}`)
     .join(' ')
-  const axisLabels = labels.length ? labels : safeValues.map(() => '')
-  const labelIndexes = Array.from(new Set([
-    0,
-    Math.floor((axisLabels.length - 1) / 2),
-    axisLabels.length - 1,
-  ])).filter((index) => axisLabels[index])
+  const labelIndexes = getEvenIndexes(axisLabels.length, 6).filter((index) => axisLabels[index])
+  const markerIndexes = getEvenIndexes(safeValues.length, 6)
+  const activePoint = hoverIndex === null ? null : chartPoints[hoverIndex]
+  const displayValue = formatValue || ((value) => value.toLocaleString())
+
+  const handlePointerMove = (event) => {
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const ratio = bounds.width > 0 ? (event.clientX - bounds.left) / bounds.width : 0
+    const nextIndex = Math.min(
+      safeValues.length - 1,
+      Math.max(0, Math.round(ratio * (safeValues.length - 1))),
+    )
+    setHoverIndex(nextIndex)
+  }
 
   return (
     <div>
-      <svg className="h-32 w-full" viewBox="0 0 100 56" preserveAspectRatio="none" role="img" aria-label="? ?? ?? ???">
+      <div className="relative">
+        <svg
+          className="h-32 w-full"
+          viewBox="0 0 100 56"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label="자산 가치 변화 추이"
+          onMouseMove={handlePointerMove}
+          onMouseLeave={() => setHoverIndex(null)}
+        >
         <defs>
           <linearGradient id="assetFill" x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor="#00f2fe" stopOpacity="0.2" />
@@ -41,7 +102,46 @@ function Sparkline({ values = [], labels = [] }) {
         </defs>
         <polyline points={`0,56 ${points} 100,56`} fill="url(#assetFill)" stroke="none" />
         <polyline points={points} fill="none" stroke="#00f2fe" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+          {activePoint ? (
+            <>
+              <line x1={activePoint.x} x2={activePoint.x} y1="4" y2="54" stroke="#94a3b8" strokeOpacity="0.35" strokeWidth="0.8" />
+            </>
+          ) : null}
+        </svg>
+        {markerIndexes.map((index) => {
+          const point = chartPoints[index]
+          const isActive = index === hoverIndex
+          return (
+            <span
+              key={`marker-${index}`}
+              className={`pointer-events-none absolute rounded-full border transition-all ${
+                isActive
+                  ? 'h-2.5 w-2.5 border-[#0f172a] bg-ai-cyan shadow-[0_0_0_2px_rgba(0,242,254,0.2)]'
+                  : 'h-1.5 w-1.5 border-ai-cyan/80 bg-[#0f172a]'
+              }`}
+              style={{
+                left: `${point.x}%`,
+                top: `${(point.y / 56) * 100}%`,
+                transform: 'translate(-50%, -50%)',
+              }}
+            />
+          )
+        })}
+        {activePoint ? (
+          <div
+            className="pointer-events-none absolute z-10 min-w-[112px] -translate-x-1/2 rounded border border-ai-cyan/30 bg-[#08111f] px-3 py-2 text-center shadow-xl shadow-black/30"
+            style={{
+              left: `${activePoint.x}%`,
+              top: `${Math.max(0, Math.min(78, (activePoint.y / 56) * 100 - 26))}%`,
+            }}
+          >
+            <p className="font-mono text-xs font-extrabold text-white">{displayValue(activePoint.value)}</p>
+            {axisLabels[hoverIndex] ? (
+              <p className="mt-1 font-mono text-[10px] font-bold text-slate-400">{axisLabels[hoverIndex]}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
       {labelIndexes.length > 0 ? (
         <div className="mt-2 grid text-[10px] font-mono text-slate-500" style={{ gridTemplateColumns: `repeat(${labelIndexes.length}, minmax(0, 1fr))` }}>
           {labelIndexes.map((index, labelIndex) => (

@@ -1,3 +1,5 @@
+import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -8,6 +10,7 @@ from backend.services.kis_client import KISClient
 
 
 KST = timezone(timedelta(hours=9))
+logger = logging.getLogger(__name__)
 MARKET_INDEX_OPEN_STALE_SECONDS = int(os.getenv("MARKET_INDEX_OPEN_STALE_SECONDS", "180"))
 MARKET_INDEX_CLOSED_STALE_SECONDS = int(os.getenv("MARKET_INDEX_CLOSED_STALE_SECONDS", "1800"))
 
@@ -20,7 +23,7 @@ KIS_INDEX_DEFINITIONS = [
         "display_order": 10,
         "kind": "fx",
         "code": "FX@KRWKFTC",
-        "env": "MOCK",
+        "env": "REAL",
     },
     {
         "symbol": "KOSPI",
@@ -63,6 +66,35 @@ KIS_INDEX_DEFINITIONS = [
         "env": "REAL",
     },
 ]
+CONFIGURED_INDEX_SYMBOLS = [item["symbol"] for item in KIS_INDEX_DEFINITIONS]
+CONFIGURED_INDEX_SYMBOL_SET = set(CONFIGURED_INDEX_SYMBOLS)
+INDEX_DEFINITION_BY_SYMBOL = {item["symbol"]: item for item in KIS_INDEX_DEFINITIONS}
+
+
+def _log_collection_stage(stage: str, symbol: str, payload: Any) -> None:
+    logger.info(
+        "[MarketIndex][%s] symbol=%s payload=%s",
+        stage,
+        symbol,
+        json.dumps(payload, ensure_ascii=False, default=str),
+    )
+
+
+def _configured_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    latest_by_symbol: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        symbol = str(row.get("symbol") or "").upper()
+        if symbol not in CONFIGURED_INDEX_SYMBOL_SET:
+            continue
+        if symbol not in latest_by_symbol:
+            latest_by_symbol[symbol] = row
+
+    ordered_rows: list[dict[str, Any]] = []
+    for symbol in CONFIGURED_INDEX_SYMBOLS:
+        row = latest_by_symbol.get(symbol)
+        if row:
+            ordered_rows.append(row)
+    return ordered_rows
 
 
 def is_korean_market_open(now: datetime | None = None) -> bool:
@@ -128,7 +160,7 @@ def fetch_kis_domestic_index_snapshot(client: KISClient, definition: dict[str, A
     change_value = float(output.get("bstp_nmix_prdy_vrss") or 0)
     change_percent = float(output.get("bstp_nmix_prdy_ctrt") or 0)
 
-    return {
+    normalized = {
         "symbol": definition["symbol"],
         "label": definition["label"],
         "source": "KIS_OPEN_API",
@@ -142,6 +174,21 @@ def fetch_kis_domestic_index_snapshot(client: KISClient, definition: dict[str, A
         "as_of": datetime.now(timezone.utc).isoformat(),
         "raw_payload": payload,
     }
+    _log_collection_stage(
+        "raw",
+        definition["symbol"],
+        {
+            "endpoint": "/uapi/domestic-stock/v1/quotations/inquire-index-price",
+            "env": definition.get("env"),
+            "params": {
+                "FID_COND_MRKT_DIV_CODE": "U",
+                "FID_INPUT_ISCD": definition["code"],
+            },
+            "response": payload,
+        },
+    )
+    _log_collection_stage("normalized", definition["symbol"], normalized)
+    return normalized
 
 
 def fetch_kis_overseas_index_snapshot(client: KISClient, definition: dict[str, Any]) -> dict[str, Any]:
@@ -175,7 +222,7 @@ def fetch_kis_overseas_index_snapshot(client: KISClient, definition: dict[str, A
     if current_value == 0 and change_value == 0 and change_percent == 0:
         raise RuntimeError(f"Overseas index returned empty values for {definition['symbol']}")
 
-    return {
+    normalized = {
         "symbol": definition["symbol"],
         "label": definition["label"],
         "source": "KIS_OPEN_API",
@@ -189,6 +236,23 @@ def fetch_kis_overseas_index_snapshot(client: KISClient, definition: dict[str, A
         "as_of": datetime.now(timezone.utc).isoformat(),
         "raw_payload": payload,
     }
+    _log_collection_stage(
+        "raw",
+        definition["symbol"],
+        {
+            "endpoint": "/uapi/overseas-price/v1/quotations/inquire-time-indexchartprice",
+            "env": definition.get("env"),
+            "params": {
+                "FID_COND_MRKT_DIV_CODE": "N",
+                "FID_INPUT_ISCD": definition["code"],
+                "FID_HOUR_CLS_CODE": "0",
+                "FID_PW_DATA_INCU_YN": "Y",
+            },
+            "response": payload,
+        },
+    )
+    _log_collection_stage("normalized", definition["symbol"], normalized)
+    return normalized
 
 
 def fetch_kis_fx_snapshot(client: KISClient, definition: dict[str, Any]) -> dict[str, Any]:
@@ -222,7 +286,7 @@ def fetch_kis_fx_snapshot(client: KISClient, definition: dict[str, Any]) -> dict
     if current_value == 0 and change_value == 0 and change_percent == 0:
         raise RuntimeError(f"FX returned empty values for {definition['symbol']}")
 
-    return {
+    normalized = {
         "symbol": definition["symbol"],
         "label": definition["label"],
         "source": "KIS_OPEN_API",
@@ -236,6 +300,23 @@ def fetch_kis_fx_snapshot(client: KISClient, definition: dict[str, Any]) -> dict
         "as_of": datetime.now(timezone.utc).isoformat(),
         "raw_payload": payload,
     }
+    _log_collection_stage(
+        "raw",
+        definition["symbol"],
+        {
+            "endpoint": "/uapi/overseas-price/v1/quotations/inquire-time-indexchartprice",
+            "env": definition.get("env"),
+            "params": {
+                "FID_COND_MRKT_DIV_CODE": "X",
+                "FID_INPUT_ISCD": definition["code"],
+                "FID_HOUR_CLS_CODE": "0",
+                "FID_PW_DATA_INCU_YN": "Y",
+            },
+            "response": payload,
+        },
+    )
+    _log_collection_stage("normalized", definition["symbol"], normalized)
+    return normalized
 
 
 def fetch_kis_index_snapshot(client: KISClient, definition: dict[str, Any]) -> dict[str, Any]:
@@ -249,10 +330,19 @@ def fetch_kis_index_snapshot(client: KISClient, definition: dict[str, Any]) -> d
 def collect_market_index_rows() -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     rows: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
+    clients_by_env: dict[str, KISClient | None] = {}
 
     for definition in KIS_INDEX_DEFINITIONS:
         try:
-            client = get_kis_market_index_client(definition.get("env", "REAL"))
+            env = definition.get("env", "REAL")
+            if env not in clients_by_env:
+                client = get_kis_market_index_client(env)
+                if client is not None:
+                    # Reuse one access token per env during a single collection pass.
+                    cached_token = client._get_cached_token()
+                    client._get_cached_token = lambda cached_token=cached_token: cached_token
+                clients_by_env[env] = client
+            client = clients_by_env[env]
             if client is None:
                 raise RuntimeError("KIS market index credentials are not configured.")
             rows.append(fetch_kis_index_snapshot(client, definition))
@@ -261,11 +351,13 @@ def collect_market_index_rows() -> tuple[list[dict[str, Any]], list[dict[str, st
                 "symbol": definition["symbol"],
                 "message": str(error),
             })
+            _log_collection_stage("error", definition["symbol"], {"message": str(error)})
 
     return rows, errors
 
 
 def serialize_market_index_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    rows = _configured_rows(rows)
     open_market = is_korean_market_open()
     stale_seconds = MARKET_INDEX_OPEN_STALE_SECONDS if open_market else MARKET_INDEX_CLOSED_STALE_SECONDS
 
@@ -299,3 +391,21 @@ def serialize_market_index_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "fetchedAt": latest_updated_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z") if latest_updated_at else None,
         "source": "supabase.market_indices_latest",
     }
+
+
+def market_index_rows_need_refresh(rows: list[dict[str, Any]]) -> bool:
+    rows = _configured_rows(rows)
+    if not rows:
+        return True
+
+    row_symbols = {str(row.get("symbol") or "").upper() for row in rows}
+    if row_symbols != CONFIGURED_INDEX_SYMBOL_SET:
+        return True
+
+    payload = serialize_market_index_rows(rows)
+    items = payload.get("items") or []
+    if not items:
+        return True
+
+    # If any configured index is stale, refresh from KIS before responding.
+    return any(bool(item.get("stale")) for item in items)

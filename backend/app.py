@@ -103,6 +103,7 @@ app.register_blueprint(trade_bp)
 # Flask 디버그 모드 리로더에 의한 스케줄러 이중 기동 방지 및 flask run 환경 지원
 is_scheduler_host = (not app.debug) or (os.environ.get("WERKZEUG_RUN_MAIN") == "true")
 SCHEDULER_RUN_IN_GATEWAY = os.getenv("SCHEDULER_RUN_IN_GATEWAY", "false").lower() == "true"
+MARKET_INDEX_SCHEDULER_RUN_IN_GATEWAY = os.getenv("MARKET_INDEX_SCHEDULER_RUN_IN_GATEWAY", "true").lower() == "true"
 
 if is_scheduler_host and SCHEDULER_RUN_IN_GATEWAY:
     start_news_ingest_scheduler(
@@ -129,17 +130,20 @@ if is_scheduler_host and SCHEDULER_RUN_IN_GATEWAY:
         quote_limit=HOME_MARKET_SNAPSHOT_LIMIT,
         max_workers=HOME_MARKET_SNAPSHOT_WORKERS,
     )
-    start_market_index_scheduler(
-        market_index_repository=market_index_repository,
-        enabled=MARKET_INDEX_SNAPSHOT_ENABLED,
-        open_interval_seconds=MARKET_INDEX_OPEN_INTERVAL_SECONDS,
-        closed_interval_seconds=MARKET_INDEX_CLOSED_INTERVAL_SECONDS,
-    )
     start_portfolio_snapshot_scheduler(
         crypto_helper=crypto,
         enabled=PORTFOLIO_SNAPSHOT_ENABLED,
         interval_seconds=PORTFOLIO_SNAPSHOT_INTERVAL_SECONDS,
         run_on_start=PORTFOLIO_SNAPSHOT_RUN_ON_START,
+    )
+
+# Keep the market index cache warm in the normal Flask process unless explicitly disabled.
+if is_scheduler_host and MARKET_INDEX_SCHEDULER_RUN_IN_GATEWAY:
+    start_market_index_scheduler(
+        market_index_repository=market_index_repository,
+        enabled=MARKET_INDEX_SNAPSHOT_ENABLED,
+        open_interval_seconds=MARKET_INDEX_OPEN_INTERVAL_SECONDS,
+        closed_interval_seconds=MARKET_INDEX_CLOSED_INTERVAL_SECONDS,
     )
 
 if __name__ == "__main__":

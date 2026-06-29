@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
-const INDEX_ENDPOINT = 'http://localhost:5050/api/market/indices'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5050'
+const INDEX_ENDPOINT = `${API_BASE_URL}/api/market/indices`
 const REFRESH_INTERVAL_MS = 60000
 const ALLOWED_INDEX_KEYS = ['USDKRW', 'KOSPI', 'KOSDAQ', 'NASDAQ100_F', 'SP500']
 const INDEX_LABELS = {
@@ -80,6 +81,10 @@ export default function GlobalIndexTickerBar() {
     const loadIndices = async () => {
       try {
         const response = await fetch(INDEX_ENDPOINT)
+        const contentType = response.headers.get('content-type') || ''
+        if (!contentType.includes('application/json')) {
+          throw new Error('지수 API가 JSON 대신 HTML을 반환했습니다. 백엔드 서버 주소를 확인해 주세요.')
+        }
         const payload = await response.json()
 
         if (!response.ok || !payload.success) {

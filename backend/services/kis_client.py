@@ -45,6 +45,8 @@ class KISClient(ExchangeClient):
         self.acnt_prdt_cd = acnt_prdt_cd
         self.env = env.upper()
         self.user_id = user_id
+        self._memory_token = None
+        self._memory_token_expires_at = None
         
         if self.env == "REAL":
             self.base_url = "https://openapi.koreainvestment.com:9443"

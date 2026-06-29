@@ -1,8 +1,12 @@
 import os
+import json
+import logging
 from typing import Any
 
 import requests
 from requests import HTTPError
+
+logger = logging.getLogger(__name__)
 
 
 class MarketIndexRepository:
@@ -17,6 +21,11 @@ class MarketIndexRepository:
     def upsert_latest(self, rows: list[dict[str, Any]]) -> None:
         if not self.is_configured or not rows:
             return
+
+        logger.info(
+            "[MarketIndex][upsert_payload] rows=%s",
+            json.dumps(rows, ensure_ascii=False, default=str),
+        )
 
         response = requests.post(
             f"{self.supabase_url}/rest/v1/market_indices_latest?on_conflict=symbol",

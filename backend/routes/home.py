@@ -7,6 +7,11 @@ from backend.services.kis_client import KISClient
 from backend.services.toss_client import TossClient
 from backend.services.coinone_client import CoinoneClient
 from backend.services.binance_client import BinanceClient
+from backend.services.market_index_service import (
+    collect_market_index_rows,
+    market_index_rows_need_refresh,
+    serialize_market_index_rows,
+)
 from backend.services.auth_service import get_user_id_from_header
 from backend.services.supabase_client import query_supabase
 
@@ -347,6 +352,81 @@ def get_market_rankings():
         return jsonify({
             "success": False,
             "message": f"거래대금 순위 조회 실패: {str(error)}",
+        }), 500
+
+@home_bp.route("/api/market/indices", methods=["GET"])
+def get_market_indices():
+    """하단 지수 바에 사용할 최신 지수 스냅샷을 반환합니다."""
+    repository = getattr(current_app, "market_index_repository", None)
+    if repository is None or not repository.is_configured:
+        return jsonify({
+            "success": False,
+            "message": "시장 지수 저장소가 아직 설정되지 않았습니다.",
+        }), 500
+
+    try:
+        rows = repository.list_latest()
+        if market_index_rows_need_refresh(rows):
+            live_rows, live_errors = collect_market_index_rows()
+            if repository.is_configured and live_rows:
+                try:
+                    repository.upsert_latest(live_rows)
+                except Exception:
+                    pass
+            if not live_rows and rows:
+                payload = serialize_market_index_rows(rows)
+                payload["source"] = "supabase.market_indices_latest"
+                payload["fallback"] = "cached.stale"
+                payload["errors"] = live_errors
+                current_app.logger.info("[MarketIndex][api_response] payload=%s", payload)
+                return jsonify({
+                    "success": True,
+                    "data": payload,
+                    "message": "실시간 갱신은 실패했지만 DB의 최신 값을 불러왔습니다.",
+                })
+            if not live_rows:
+                return jsonify({
+                    "success": False,
+                    "message": "저장된 지수 데이터가 없고 실시간 수집도 실패했습니다.",
+                    "errors": live_errors,
+                }), 503
+
+            payload = serialize_market_index_rows(live_rows)
+            payload["source"] = "live.collector"
+            payload["bootstrap"] = not rows
+            payload["errors"] = live_errors
+            current_app.logger.info("[MarketIndex][api_response] payload=%s", payload)
+            return jsonify({
+                "success": True,
+                "data": payload,
+            })
+
+        payload = serialize_market_index_rows(rows)
+        current_app.logger.info("[MarketIndex][api_response] payload=%s", payload)
+        return jsonify({
+            "success": True,
+            "data": payload,
+        })
+    except Exception as error:
+        live_rows, live_errors = collect_market_index_rows()
+        if live_rows:
+            if repository.is_configured:
+                try:
+                    repository.upsert_latest(live_rows)
+                except Exception:
+                    pass
+            payload = serialize_market_index_rows(live_rows)
+            payload["source"] = "live.collector"
+            payload["bootstrap"] = True
+            payload["errors"] = [str(error), *[item["message"] for item in live_errors]]
+            current_app.logger.info("[MarketIndex][api_response] payload=%s", payload)
+            return jsonify({
+                "success": True,
+                "data": payload,
+            })
+        return jsonify({
+            "success": False,
+            "message": f"지수 데이터 조회 실패: {str(error)}",
         }), 500
 
 @home_bp.route("/api/dashboard/balance", methods=["POST"])

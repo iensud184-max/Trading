@@ -211,8 +211,8 @@ export default function AssetsTab({ balance, allocation, displayCurrency = 'KRW'
                   </td>
                   <td className="px-5 py-4 font-mono">{item.quantity}</td>
                   <td className="px-5 py-4 font-mono">{item.average}</td>
-                  <td className={`px-5 py-4 font-mono font-semibold ${parseNumeric(item.profit) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {parseNumeric(item.profit) >= 0 ? '+' : ''}{item.profit}
+                  <td className={`px-5 py-4 font-mono font-semibold ${parseNumeric(item.profit) > 0 ? 'text-red-400' : parseNumeric(item.profit) < 0 ? 'text-blue-400' : 'text-white'}`}>
+                    {parseNumeric(item.profit) > 0 ? '+' : ''}{item.profit}
                   </td>
                   <td className="px-5 py-4"><Rate value={item.returnRate} /></td>
                 </tr>

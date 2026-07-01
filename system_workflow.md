@@ -21,8 +21,6 @@ graph TD
         WorkerMain["backend/worker.py"]
         MLScheduler["ml_scheduler.py"]
         MarketScheduler["market_snapshot_scheduler.py"]
-        IndexScheduler["market_index_scheduler.py"]
-        PortfolioScheduler["portfolio_snapshot_scheduler.py"]
     end
 
     subgraph Supabase ["Supabase"]
@@ -54,8 +52,6 @@ graph TD
 
     WorkerMain --> MLScheduler
     WorkerMain --> MarketScheduler
-    WorkerMain --> IndexScheduler
-    WorkerMain --> PortfolioScheduler
 
     MLScheduler --> Locks
     MLScheduler --> TokenCaches
@@ -64,10 +60,6 @@ graph TD
     MLScheduler --> Binance
 
     MarketScheduler --> KIS
-    IndexScheduler --> DB
-    PortfolioScheduler --> UserKeys
-    PortfolioScheduler --> Toss
-    PortfolioScheduler --> KIS
 
     Routes --> NewsArticles
     MLScheduler --> NewsArticles
@@ -87,8 +79,7 @@ graph TD
 현재 기본 동작에서 중요한 점:
 
 - `SCHEDULER_RUN_IN_GATEWAY=false`가 기본값입니다.
-- 따라서 뉴스 수집, ML 자동화, 홈 마켓 스냅샷, 포트폴리오 스냅샷은 기본적으로 `worker.py`를 별도 실행하는 구조가 기준입니다.
-- `MARKET_INDEX_SCHEDULER_RUN_IN_GATEWAY=true`가 기본값이므로 시장 인덱스 스케줄러는 gateway에서도 유지될 수 있습니다.
+- 따라서 뉴스 수집, ML 자동화, 홈 마켓 스냅샷은 기본적으로 `worker.py`를 별도 실행하는 구조가 기준입니다.
 
 ### `backend/worker.py`
 
@@ -97,8 +88,6 @@ graph TD
 1. 뉴스 수집 스케줄러
 2. ML 자동화 스케줄러
 3. 홈 마켓 스냅샷 스케줄러
-4. 시장 인덱스 스케줄러
-5. 포트폴리오 스냅샷 스케줄러
 
 운영 문서에서는 "스케줄러는 app.py에서 항상 돈다"라고 적으면 사실과 다릅니다.
 

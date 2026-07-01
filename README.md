@@ -12,7 +12,7 @@
 - 백엔드
   - `home`, `keys`, `ml`, `news`, `trade` Blueprint API
   - Toss/KIS/Coinone/Binance 클라이언트
-  - 뉴스 수집/요약, 시장 인덱스 스냅샷, 포트폴리오 스냅샷
+  - 뉴스 수집/요약
   - ML 자동 수집/학습 스케줄러, 승격 검증, serving 감사
 - ML
   - 주식 신호 모델: `v1` ~ `v11`
@@ -101,9 +101,7 @@ python src/run_pipeline_bundle.py \
 
 - `POST /api/home/market`
 - `POST /api/home/overview`
-- `GET /api/dashboard/asset-trend`
 - `GET /api/market/rankings`
-- `GET /api/market/indices`
 - `POST /api/market/kis/sync`
 - `POST /api/dashboard/balance`
 

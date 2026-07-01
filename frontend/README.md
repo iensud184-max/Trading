@@ -56,7 +56,6 @@ src/pages/
 ```text
 src/components/
 ├── DashboardComponents.jsx
-├── GlobalIndexTickerBar.jsx
 ├── Header.jsx
 ├── InvestmentSurveyModal.jsx
 └── SymbolSearch.jsx

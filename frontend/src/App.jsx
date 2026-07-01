@@ -10,7 +10,6 @@ import Home from './pages/Home'
 import AdminMlData from './pages/AdminMlData'
 import AssetDetail from './pages/AssetDetail'
 import InvestmentSurveyModal from './components/InvestmentSurveyModal'
-import GlobalIndexTickerBar from './components/GlobalIndexTickerBar'
 
 function AppShell({
   isLoggedIn,
@@ -29,7 +28,6 @@ function AppShell({
   handleLogout,
 }) {
   const location = useLocation()
-  const hideIndexTicker = location.pathname === '/login' || location.pathname === '/signup'
 
   const handlePhoneFormatChange = (e) => {
     const value = e.target.value.replace(/[^0-9]/g, '')
@@ -159,7 +157,7 @@ function AppShell({
         />
       )}
 
-      <div className={hideIndexTicker ? '' : 'pb-16'}>
+      <div>
         <Routes>
           <Route
             path="/"
@@ -231,7 +229,6 @@ function AppShell({
         </Routes>
       </div>
 
-      {!hideIndexTicker && <GlobalIndexTickerBar />}
     </>
   )
 }

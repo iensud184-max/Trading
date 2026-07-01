@@ -18,11 +18,8 @@ from backend.services.news_repository import NewsRepository
 from backend.services.news_ingest import NewsIngestService
 from backend.services.news_summary_service import NewsSummaryService
 from backend.services.kis_market_universe import KISMarketUniverseService
-from backend.services.market_index_repository import MarketIndexRepository
-from backend.services.market_index_scheduler import start_market_index_scheduler
 from backend.services.market_snapshot_scheduler import start_market_snapshot_scheduler
 from backend.services.ml_scheduler import start_news_ingest_scheduler, start_ml_automation_scheduler
-from backend.services.portfolio_snapshot_scheduler import start_portfolio_snapshot_scheduler
 
 from backend.routes.home import home_bp
 from backend.routes.keys import keys_bp
@@ -59,12 +56,6 @@ HOME_MARKET_OPEN_INTERVAL_SECONDS = int(os.getenv("HOME_MARKET_OPEN_INTERVAL_SEC
 HOME_MARKET_CLOSED_INTERVAL_SECONDS = int(os.getenv("HOME_MARKET_CLOSED_INTERVAL_SECONDS", "600"))
 HOME_MARKET_SNAPSHOT_LIMIT = int(os.getenv("HOME_MARKET_SNAPSHOT_LIMIT", "300"))
 HOME_MARKET_SNAPSHOT_WORKERS = int(os.getenv("HOME_MARKET_SNAPSHOT_WORKERS", "2"))
-MARKET_INDEX_SNAPSHOT_ENABLED = os.getenv("MARKET_INDEX_SNAPSHOT_ENABLED", "true").lower() == "true"
-MARKET_INDEX_OPEN_INTERVAL_SECONDS = int(os.getenv("MARKET_INDEX_OPEN_INTERVAL_SECONDS", "60"))
-MARKET_INDEX_CLOSED_INTERVAL_SECONDS = int(os.getenv("MARKET_INDEX_CLOSED_INTERVAL_SECONDS", "600"))
-PORTFOLIO_SNAPSHOT_ENABLED = os.getenv("PORTFOLIO_SNAPSHOT_ENABLED", "true").lower() == "true"
-PORTFOLIO_SNAPSHOT_INTERVAL_SECONDS = int(os.getenv("PORTFOLIO_SNAPSHOT_INTERVAL_SECONDS", "60"))
-PORTFOLIO_SNAPSHOT_RUN_ON_START = os.getenv("PORTFOLIO_SNAPSHOT_RUN_ON_START", "false").lower() == "true"
 
 # Flask Config에 값 바인딩
 app.config["KIS_APPKEY"] = KIS_APPKEY
@@ -84,14 +75,12 @@ news_repository = NewsRepository()
 news_ingest_service = NewsIngestService()
 news_summary_service = NewsSummaryService()
 kis_market_universe_service = KISMarketUniverseService()
-market_index_repository = MarketIndexRepository()
 
 app.crypto = crypto
 app.news_repository = news_repository
 app.news_ingest_service = news_ingest_service
 app.news_summary_service = news_summary_service
 app.kis_market_universe_service = kis_market_universe_service
-app.market_index_repository = market_index_repository
 
 # Blueprint 등록
 app.register_blueprint(home_bp)
@@ -103,7 +92,6 @@ app.register_blueprint(trade_bp)
 # Flask 디버그 모드 리로더에 의한 스케줄러 이중 기동 방지 및 flask run 환경 지원
 is_scheduler_host = (not app.debug) or (os.environ.get("WERKZEUG_RUN_MAIN") == "true")
 SCHEDULER_RUN_IN_GATEWAY = os.getenv("SCHEDULER_RUN_IN_GATEWAY", "false").lower() == "true"
-MARKET_INDEX_SCHEDULER_RUN_IN_GATEWAY = os.getenv("MARKET_INDEX_SCHEDULER_RUN_IN_GATEWAY", "true").lower() == "true"
 
 if is_scheduler_host and SCHEDULER_RUN_IN_GATEWAY:
     start_news_ingest_scheduler(
@@ -130,22 +118,6 @@ if is_scheduler_host and SCHEDULER_RUN_IN_GATEWAY:
         quote_limit=HOME_MARKET_SNAPSHOT_LIMIT,
         max_workers=HOME_MARKET_SNAPSHOT_WORKERS,
     )
-    start_portfolio_snapshot_scheduler(
-        crypto_helper=crypto,
-        enabled=PORTFOLIO_SNAPSHOT_ENABLED,
-        interval_seconds=PORTFOLIO_SNAPSHOT_INTERVAL_SECONDS,
-        run_on_start=PORTFOLIO_SNAPSHOT_RUN_ON_START,
-    )
-
-# Keep the market index cache warm in the normal Flask process unless explicitly disabled.
-if is_scheduler_host and MARKET_INDEX_SCHEDULER_RUN_IN_GATEWAY:
-    start_market_index_scheduler(
-        market_index_repository=market_index_repository,
-        enabled=MARKET_INDEX_SNAPSHOT_ENABLED,
-        open_interval_seconds=MARKET_INDEX_OPEN_INTERVAL_SECONDS,
-        closed_interval_seconds=MARKET_INDEX_CLOSED_INTERVAL_SECONDS,
-    )
-
 if __name__ == "__main__":
     # Flask 서버 구동 (python backend/app.py 로 기동할 때만 타며, flask run 시에는 타지 않음)
     app.run(host="0.0.0.0", port=5050, debug=True)

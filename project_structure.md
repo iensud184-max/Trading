@@ -50,9 +50,6 @@ backend/
 │   ├── kis_client.py
 │   ├── kis_market_universe.py
 │   ├── lock_service.py
-│   ├── market_index_repository.py
-│   ├── market_index_scheduler.py
-│   ├── market_index_service.py
 │   ├── market_repository.py
 │   ├── market_snapshot_scheduler.py
 │   ├── ml_automation_service.py
@@ -64,7 +61,6 @@ backend/
 │   ├── news_query_planner.py
 │   ├── news_repository.py
 │   ├── news_summary_service.py
-│   ├── portfolio_snapshot_scheduler.py
 │   ├── supabase_client.py
 │   ├── symbol_metadata.py
 │   ├── token_cache_service.py
@@ -87,8 +83,6 @@ backend/
   - 뉴스 수집
   - ML 자동화
   - 홈 마켓 스냅샷
-  - 시장 인덱스 스냅샷
-  - 포트폴리오 스냅샷
 - `routes/`
   - HTTP API 입구
 - `services/`
@@ -120,7 +114,6 @@ frontend/
     ├── assets/
     ├── components/
     │   ├── DashboardComponents.jsx
-    │   ├── GlobalIndexTickerBar.jsx
     │   ├── Header.jsx
     │   ├── InvestmentSurveyModal.jsx
     │   └── SymbolSearch.jsx

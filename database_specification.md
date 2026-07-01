@@ -12,7 +12,6 @@ erDiagram
     profiles ||--o{ trade_proposals : "creates"
     profiles ||--o{ broker_order_history : "syncs"
     profiles ||--o{ auto_trading_rules : "defines"
-    profiles ||--o{ portfolio_snapshots : "saves"
     profiles ||--o{ user_watchlist : "favorites"
     profiles ||--o{ chat_history : "dialogues"
     profiles ||--o{ paper_portfolios : "paper_trading"
@@ -146,38 +145,7 @@ erDiagram
     *   `auth.uid() = user_id` 조건으로 사용자별 원장만 조회/관리 가능
     *   Supabase Realtime publication에 포함되어 거래내역 탭에서 즉시 반영 가능
 
-### 2.5 portfolio_snapshots
-*   **용도**: 포트폴리오 자산 스냅샷 스케줄러가 매시간/매일 기록하는 자산 정보. 대시보드의 누적 자산 변동 차트를 그리는 원천 데이터.
-*   **주요 컬럼**:
-    *   `id` (UUID, PK)
-    *   `user_id` (UUID, FK) - `profiles.id` 참조
-    *   `snapshot_at` (TIMESTAMPTZ) - 스냅샷 타임스탬프
-    *   `snapshot_date` (DATE) - 일별 조회를 위한 날짜 인덱스
-    *   `total_evaluation` (NUMERIC) - 총 평가 자산 (자산 + 잔고)
-    *   `available_cash` (NUMERIC) - 출금 가능 예수금
-    *   `portfolio_profit_rate` (NUMERIC) - 포트폴리오 누적 수익률 (%)
-    *   `broker_env` (TEXT) - `MOCK`, `REAL`
-    *   `created_at` (TIMESTAMPTZ)
-*   **RLS**:
-    *   `auth.uid() = user_id` 기반 RLS 적용.
-
-### 2.6 market_indices_latest
-*   **용도**: 대시보드 상단 배너 영역에 띄우는 글로벌 및 한국 주요 지수(KOSPI, KOSDAQ, S&P 500, NASDAQ, DOW 등)의 최신 시세 데이터 캐시.
-*   **주요 컬럼**:
-    *   `symbol` (TEXT, PK) - 지수 코드 (예: `.KS11`, `^IXIC`)
-    *   `label` (TEXT) - 노출할 지수명 (예: "코스피", "나스닥")
-    *   `source` (TEXT) - 제공 출처 (예: `TOSS`, `KIS`, `YAHOO`)
-    *   `market_country` (TEXT) - `KR` / `US`
-    *   `current_value` (NUMERIC) - 지수 현재가
-    *   `change_value` (NUMERIC) - 대비 변동액
-    *   `change_percent` (NUMERIC) - 대비 변동률 (%)
-    *   `currency` (TEXT) - 기준 통화
-    *   `display_order` (INTEGER) - 화면 정렬 순서
-    *   `as_of` (TIMESTAMPTZ) - 최종 수집 시각
-*   **RLS**:
-    *   조회(SELECT)는 누구나 가능(Anonymous 허용), 갱신(UPSERT)은 `service_role` 계정 전용 정책.
-
-### 2.7 news_articles
+### 2.5 news_articles
 *   **용도**: 실시간 수집된 뉴스 및 종목 키워드, 그리고 AI 요약(Sentiment, Summary) 정보를 적재하여 RAG 챗봇 및 종목 상세 뉴스에 데이터를 급지함.
 *   **주요 컬럼**:
     *   `id` (UUID, PK)
@@ -198,7 +166,7 @@ erDiagram
 *   **RLS**:
     *   조회는 인증된 모든 사용자(`authenticated`) 가능.
 
-### 2.8 news_fetch_logs
+### 2.6 news_fetch_logs
 *   **용도**: 뉴스 수집 봇의 동작 상태 및 배치 결과를 기록하는 로깅 테이블.
 *   **주요 컬럼**:
     *   `id` (UUID, PK)
@@ -210,7 +178,7 @@ erDiagram
     *   `started_at` (TIMESTAMPTZ)
     *   `error_message` (TEXT)
 
-### 2.9 user_watchlist
+### 2.7 user_watchlist
 *   **용도**: 사용자가 개별적으로 "하트"를 눌러 즐겨찾기 목록에 등록한 관심 종목 보관 테이블.
 *   **주요 컬럼**:
     *   `id` (UUID, PK)
@@ -228,7 +196,7 @@ erDiagram
 *   **RLS**:
     *   `auth.uid() = user_id` 조건으로 사용자 단위로 안전하게 격리되어 조회/추가/수정/삭제 가능.
 
-### 2.10 token_caches
+### 2.8 token_caches
 *   **용도**: Toss 및 KIS Open API 호출 시 사용하는 OAuth 2.0 Access Token 및 만료 기한의 공유 캐시 저장소.
 *   **주요 컬럼**:
     *   `id` (UUID, PK)
@@ -241,15 +209,15 @@ erDiagram
 *   **RLS**:
     *   `auth.uid() = user_id` 조건으로 본인의 토큰 정보에만 접근 가능.
 
-### 2.11 active_locks
-*   **용도**: 백그라운드 스레드 및 워커가 기동될 때 크론(뉴스 크롤러, 포트폴리오 스냅샷 등)의 동시성 이중 구동을 막기 위한 PostgreSQL 분산 뮤텍스 락 테이블.
+### 2.9 active_locks
+*   **용도**: 백그라운드 스레드 및 워커가 기동될 때 크론(뉴스 크롤러, ML 자동화 등)의 동시성 이중 구동을 막기 위한 PostgreSQL 분산 뮤텍스 락 테이블.
 *   **주요 컬럼**:
-    *   `key` (TEXT, PK) - 락 명칭 (예: `news_ingest`, `portfolio_snapshot`)
+    *   `key` (TEXT, PK) - 락 명칭 (예: `news_ingest`, `ml_automation`)
     *   `owner` (TEXT) - 락을 소유한 프로세스/스레드 정보
     *   `expires_at` (TIMESTAMPTZ) - 락 자동 릴리즈 시간
     *   `created_at` (TIMESTAMPTZ)
 
-### 2.12 ml_dataset_jobs
+### 2.10 ml_dataset_jobs
 *   **용도**: 머신러닝 학습 데이터를 추출하는 백그라운드 데이터 수집 작업 로그 정보.
 *   **주요 컬럼**:
     *   `id` (UUID, PK)
@@ -261,7 +229,7 @@ erDiagram
     *   `row_count` (INTEGER)
     *   `output_path` (TEXT) - 데이터셋 저장 파일 경로
 
-### 2.13 ml_training_runs
+### 2.11 ml_training_runs
 *   **용도**: LightGBM 알고리즘 모델의 로컬 사전 학습 실행 세부 통계 지표와 평가(Metrics) 로깅 테이블.
 *   **주요 컬럼**:
     *   `id` (UUID, PK)
@@ -270,7 +238,7 @@ erDiagram
     *   `status` (TEXT) - `running`, `success`, `failed`
     *   `metrics_json` (JSONB) - 백테스트 수익률, MDD, CV Accuracy 등 평가지표
 
-### 2.14 ml_model_registry
+### 2.12 ml_model_registry
 *   **용도**: 학습이 끝난 모델 파일의 메타데이터를 저장하고, 실제 추론에 기동되는 서빙(`Serving`) 모델을 승격 및 통제하기 위한 레지스트리.
 *   **주요 컬럼**:
     *   `id` (UUID, PK)
@@ -280,7 +248,7 @@ erDiagram
     *   `is_recommended` (BOOLEAN)
     *   `approved_by` (UUID) - 최종 승인 시니어 개발자 ID
 
-### 2.15 kis_stock_master (종목 마스터 원천 DB)
+### 2.13 kis_stock_master (종목 마스터 원천 DB)
 *   **용도**: 국내 및 미국 상장 주식의 원천 정보 데이터베이스. 백엔드의 종목코드 자동완성 및 한글 종목명-종목코드 동적 치환 검색용 단일 원천(Single Source of Truth)으로 동작합니다.
 *   **주요 컬럼**:
     *   `id` (UUID, PK)
@@ -303,7 +271,7 @@ erDiagram
 *   **RLS**:
     *   일반 사용자는 조회(SELECT)만 가능, 생성/수정/삭제 권한은 `service_role` 전용.
 
-### 2.16 kis_stock_turnover_latest
+### 2.14 kis_stock_turnover_latest
 *   **용도**: KIS 거래대금 및 시가총액 정보의 캐시를 저장하는 실시간 통계 테이블. 대시보드의 실시간 랭킹(거래량/상승률 등) 위젯에 사용됩니다.
 *   **주요 컬럼**:
     *   `id` (UUID, PK)
@@ -321,7 +289,7 @@ erDiagram
 
 ---
 
-### 2.17 paper_portfolios
+### 2.15 paper_portfolios
 *   **용도**: 모의투자(`MOCK` 환경) 모드 시 사용자의 모의 예수금 및 모의 매매 평단가/수량을 보관하여 가상 자산을 연산해 주는 테이블.
 *   **주요 컬럼**:
     *   `id` (UUID, PK)
@@ -337,7 +305,7 @@ erDiagram
 *   **RLS**:
     *   `auth.uid() = user_id` 인 사용자만 자신의 모의 잔고 조회 및 관리 가능.
 
-### 2.18 chat_history
+### 2.16 chat_history
 *   **용도**: 사용자와 트레이딩 챗봇(AI 비서) 간의 대화 이력을 데이터베이스에 저장하여, 페이지 새로고침 시에도 이전 대화 맥락을 즉시 로드해 복구하기 위한 테이블.
 *   **주요 컬럼**:
     *   `id` (BIGINT, PK, Identity)

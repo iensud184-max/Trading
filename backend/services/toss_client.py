@@ -30,12 +30,17 @@ class TossClient(ExchangeClient):
     토스증권 Open API 연동 및 연결 검증을 담당하는 클라이언트 클래스입니다.
     """
     def __init__(self, client_id: str, client_secret: str, account_seq: str = None, env: str = "MOCK", user_id: str | None = None):
+        import hashlib
         self.client_id = client_id
         self.client_secret = client_secret
         self.account_seq = account_seq
         self.env = env.upper()
         self.base_url = "https://openapi.tossinvest.com"
         self.user_id = user_id
+        if self.client_id:
+            self.credential_hash = hashlib.sha256(self.client_id.encode("utf-8")).hexdigest()
+        else:
+            self.credential_hash = None
         # 토큰 캐시 상태를 마지막 호출 결과와 함께 보관한다.
         self._last_token_cache_info = {
             "source": "token_cache_service",
@@ -205,7 +210,7 @@ class TossClient(ExchangeClient):
         """
         from backend.services.token_cache_service import clear_db_token
         try:
-            clear_db_token("TOSS", self.env, self.user_id)
+            clear_db_token("TOSS", self.env, self.user_id, self.credential_hash)
         except Exception:
             pass
         self._access_token_cache = {
@@ -241,7 +246,7 @@ class TossClient(ExchangeClient):
                 return cached_token
         
         # DB에서 유효한 공용 토큰 획득 시도
-        cache_state = get_db_token_with_status("TOSS", self.env, self.user_id)
+        cache_state = get_db_token_with_status("TOSS", self.env, self.user_id, self.credential_hash)
         self._last_token_cache_info = {
             "source": "token_cache_service",
             "cacheStatus": cache_state.get("cache_status", "MISS"),
@@ -269,7 +274,7 @@ class TossClient(ExchangeClient):
 
         # DB 캐시 테이블에 신규 토큰 저장 (Upsert)
         try:
-            set_db_token("TOSS", self.env, new_token, expires_in, self.user_id)
+            set_db_token("TOSS", self.env, new_token, expires_in, self.user_id, self.credential_hash)
         except Exception:
             pass
         self._access_token_cache = {
@@ -774,6 +779,15 @@ class TossClient(ExchangeClient):
 
         res = self._send_request("POST", url, json=payload, headers=headers)
         if res.status_code != 200:
+            try:
+                error = (res.json() or {}).get("error") or {}
+            except ValueError:
+                error = {}
+            if error.get("code") == "opposite-pending-order-exists":
+                raise Exception("주문 전송 실패\n토스 주문 접수 실패 : 반대 포지션 미체결 주문이 존재합니다.")
+            error_message = error.get("message")
+            if error_message:
+                raise Exception(f"토스 주문 접수 실패 : {error_message}")
             raise Exception(f"토스 주문 접수 실패: {res.text}")
 
         data = res.json()
@@ -809,7 +823,7 @@ class TossClient(ExchangeClient):
             "X-Tossinvest-Account": self.account_seq,
             "Content-Type": "application/json"
         }
-        res = self._send_request("POST", url, headers=headers)
+        res = self._send_request("POST", url, headers=headers, timeout=20)
         if res.status_code != 200:
             raise Exception(f"토스 주문 취소 실패: {res.text}")
 
@@ -821,7 +835,14 @@ class TossClient(ExchangeClient):
             "raw": data
         }
 
-    def modify_order(self, order_id: str, price: float | None = None, quantity: float | None = None) -> dict:
+    def modify_order(
+        self,
+        order_id: str,
+        price: float | None = None,
+        quantity: float | None = None,
+        order_type: str = "LIMIT",
+        confirm_high_value_order: bool | None = None,
+    ) -> dict:
         """
         접수된 토스 대기 주문의 가격 또는 수량을 정정합니다.
         """
@@ -842,13 +863,17 @@ class TossClient(ExchangeClient):
             "X-Tossinvest-Account": self.account_seq,
             "Content-Type": "application/json"
         }
-        payload = {}
+        payload = {
+            "orderType": str(order_type or "LIMIT").upper(),
+        }
         if price is not None:
-            payload["price"] = price
+            payload["price"] = str(price)
         if quantity is not None:
-            payload["quantity"] = quantity
+            payload["quantity"] = str(int(quantity)) if float(quantity).is_integer() else str(quantity)
+        if confirm_high_value_order is not None:
+            payload["confirmHighValueOrder"] = bool(confirm_high_value_order)
 
-        res = self._send_request("POST", url, json=payload, headers=headers)
+        res = self._send_request("POST", url, json=payload, headers=headers, timeout=20)
         if res.status_code != 200:
             raise Exception(f"토스 주문 정정 실패: {res.text}")
 
@@ -877,17 +902,26 @@ class TossClient(ExchangeClient):
             "X-Tossinvest-Account": self.account_seq,
             "Content-Type": "application/json"
         }
-        res = self._send_request("GET", url, headers=headers)
+        res = self._send_request("GET", url, headers=headers, timeout=15)
         if res.status_code != 200:
             raise Exception(f"토스 주문 조회 실패: {res.text}")
 
         data = res.json()
         result = data.get("result", {})
+        execution = result.get("execution") or {}
+        qty = float(result.get("quantity", 0) or 0)
+        executed_qty = float(
+            result.get("executedQuantity")
+            or result.get("filledQuantity")
+            or execution.get("filledQuantity")
+            or 0
+        )
         return {
             "order_id": result.get("orderId"),
             "status": result.get("status"),
-            "qty": float(result.get("quantity", 0)),
-            "executed_qty": float(result.get("executedQuantity", 0)),
+            "qty": qty,
+            "executed_qty": executed_qty,
+            "remaining_qty": max(qty - executed_qty, 0.0),
             "raw": data
         }
 

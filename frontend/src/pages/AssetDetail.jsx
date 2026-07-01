@@ -99,6 +99,11 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
   const effectiveOrderPrice = orderType === 'LIMIT' ? Number(price || 0) : currentPrice
   const totalEstimatedAmount = effectiveOrderPrice * Number(quantity || 0)
   const isStockAsset = resolvedAssetType === 'STOCK'
+  const orderCurrencyCode = exchange === 'COINONE'
+    ? 'KRW'
+    : exchange === 'BINANCE'
+      ? 'USD'
+      : (/^\d+$/.test(symbol) ? 'KRW' : 'USD')
   const showLevel2Panel = false
 
   const [isMarketClosed, setIsMarketClosed] = useState(false)
@@ -224,7 +229,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
   // 종목 메타데이터(한글명 등) 조회
   const fetchSymbolMetadata = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/symbol/lookup?query=${symbol}`)
+      const response = await fetch(`${API_BASE_URL}/api/symbol/lookup?query=${symbol}&asset_type=${normalizedRouteAssetType}`)
       const resData = await response.json()
       if (resData.success && resData.data && resData.data.display_name) {
         setDisplayName(resData.data.display_name)
@@ -1059,6 +1064,12 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
   }, [exchange, symbol, brokerEnv, level2PollMs, isStockAsset, showLevel2Panel]);
 
   useEffect(() => {
+    if (exchange === 'COINONE' && orderType === 'MARKET') {
+      setOrderType('LIMIT')
+    }
+  }, [exchange, orderType])
+
+  useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       fetchOrderPrecheck()
     }, isStockAsset ? 800 : 250)
@@ -1200,6 +1211,12 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
       return
     }
 
+    if (exchange === 'COINONE' && orderType !== 'LIMIT') {
+      setTradeMessage({ text: '코인원 주문은 현재 지정가만 지원합니다.', isError: true })
+      setSubmitting(false)
+      return
+    }
+
     if (brokerEnv === 'REAL' && orderPrecheck?.exceeds_real_order_limit) {
       setTradeMessage({ text: '실거래 1회 주문 한도를 초과했습니다. 수량 또는 단가를 조정해 주세요.', isError: true })
       setSubmitting(false)
@@ -1246,7 +1263,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
       if (resData.success) {
         const autoExitMessage = resData.auto_exit ? ` / ${resData.auto_exit}` : ''
         setTradeMessage({
-          text: `주문이 성공적으로 전송되었습니다! 주문번호: ${resData.order_id || 'MOCK'}${autoExitMessage}`,
+          text: `주문이 성공적으로 전송되었습니다!${autoExitMessage}`,
           isError: false
         })
         setQuantity('')
@@ -1448,8 +1465,9 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
             <div className="bg-[#0e1529]/90 border border-[#1f2945] rounded-xl p-5 backdrop-blur-md">
               <div className="flex border-b border-[#1f2945] pb-2 mb-4">
                 {[
-                  { id: 'news', label: '뉴스 및 공시' },
-                  { id: 'community', label: '토론(커뮤니티)' }
+                  { id: 'news', label: '뉴스' },
+                  { id: 'disclosure', label: '공시' },
+                  { id: 'community', label: '토론' }
                 ].map(t => (
                   <button
                     key={t.id}
@@ -1462,53 +1480,81 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
               </div>
 
               {activeTab === 'news' && (
-                <div className="flex flex-col gap-4 max-h-[220px] overflow-y-auto pr-1">
-                  {loadingNews ? (
-                    <div className="py-8 text-center text-xs text-cyan-400/80 font-mono animate-pulse">
-                      실시간 크롤링 뉴스 분석 중...
+                <div className="max-h-[280px] overflow-y-auto pr-1">
+                  <section className="min-h-[220px] rounded-lg border border-[#1f2945]/70 bg-[#07111f]/70 p-4">
+                    <div className="mb-3 flex items-center justify-between border-b border-[#1f2945]/50 pb-2">
+                      <h3 className="text-xs font-bold text-cyan-300">뉴스</h3>
+                      <span className="text-[10px] font-mono text-slate-500">{newsList.length}건</span>
                     </div>
-                  ) : newsList.length > 0 ? (
-                    <>
-                      <div className="border-l-2 border-cyan-500 pl-3 py-1.5 bg-cyan-950/20 rounded-r">
-                        <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">AI RAG 뉴스 핵심 요약</span>
-                        <p className="text-xs text-[#e2e2ec] mt-1 leading-relaxed">
-                          {newsList.find(n => n.ai_summary)?.ai_summary || newsList[0]?.summary || `${symbol} 종목에 대한 실시간 수집 뉴스를 분석 중입니다.`}
-                        </p>
-                      </div>
-                      {newsList.map(item => (
-                        <div key={item.id} className="flex justify-between items-center text-xs py-2 border-b border-[#1f2945]/30 hover:bg-slate-800/10 px-1 rounded transition-all">
-                          <a 
-                            href={item.url} 
-                            target="_blank" 
-                            rel="noopener noreferrer" 
-                            className="text-[#e2e2ec] truncate max-w-[80%] hover:underline cursor-pointer"
-                          >
-                            {item.title}
-                          </a>
-                          <span className="text-[10px] text-slate-500 font-mono">{formatTime(item.published_at)}</span>
+
+                    <div className="flex flex-col gap-3">
+                      {loadingNews ? (
+                        <div className="py-8 text-center text-xs text-cyan-400/80 font-mono animate-pulse">
+                          실시간 크롤링 뉴스 분석 중...
                         </div>
-                      ))}
-                    </>
-                  ) : (
-                    <div className="flex flex-col items-center gap-3 py-8 text-center">
-                      <p className="text-xs text-slate-500 font-mono">
-                        해당 종목의 실시간 수집 뉴스가 존재하지 않습니다.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={handleRequestNewsSync}
-                        disabled={newsSyncing}
-                        className="rounded-lg border border-cyan-500/40 bg-cyan-950/30 px-3 py-2 text-[11px] font-bold text-cyan-300 transition hover:bg-cyan-900/40 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {newsSyncing ? '뉴스 수집 요청 중...' : '뉴스 수집 요청하기'}
-                      </button>
-                      {newsSyncMessage.text ? (
-                        <p className={`max-w-[320px] text-[11px] leading-5 ${newsSyncMessage.isError ? 'text-rose-300' : 'text-cyan-300'}`}>
-                          {newsSyncMessage.text}
-                        </p>
-                      ) : null}
+                      ) : newsList.length > 0 ? (
+                        <>
+                          <div className="border-l-2 border-cyan-500 pl-3 py-1.5 bg-cyan-950/20 rounded-r">
+                            <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">AI RAG 뉴스 핵심 요약</span>
+                            <p className="text-xs text-[#e2e2ec] mt-1 leading-relaxed">
+                              {newsList.find(n => n.ai_summary)?.ai_summary || newsList[0]?.summary || `${symbol} 종목에 대한 실시간 수집 뉴스를 분석 중입니다.`}
+                            </p>
+                          </div>
+                          {newsList.map(item => (
+                            <div key={item.id} className="flex justify-between items-center text-xs py-2 border-b border-[#1f2945]/30 hover:bg-slate-800/10 px-1 rounded transition-all">
+                              <a
+                                href={item.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[#e2e2ec] truncate max-w-[80%] hover:underline cursor-pointer"
+                              >
+                                {item.title}
+                              </a>
+                              <span className="text-[10px] text-slate-500 font-mono">{formatTime(item.published_at)}</span>
+                            </div>
+                          ))}
+                        </>
+                      ) : (
+                        <div className="flex flex-col items-center gap-3 py-8 text-center">
+                          <p className="text-xs text-slate-500 font-mono">
+                            해당 종목의 실시간 수집 뉴스가 존재하지 않습니다.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleRequestNewsSync}
+                            disabled={newsSyncing}
+                            className="rounded-lg border border-cyan-500/40 bg-cyan-950/30 px-3 py-2 text-[11px] font-bold text-cyan-300 transition hover:bg-cyan-900/40 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {newsSyncing ? '뉴스 수집 요청 중...' : '뉴스 수집 요청하기'}
+                          </button>
+                          {newsSyncMessage.text ? (
+                            <p className={`max-w-[320px] text-[11px] leading-5 ${newsSyncMessage.isError ? 'text-rose-300' : 'text-cyan-300'}`}>
+                              {newsSyncMessage.text}
+                            </p>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </section>
+                </div>
+              )}
+
+              {activeTab === 'disclosure' && (
+                <div className="max-h-[280px] overflow-y-auto pr-1">
+                  <section className="min-h-[220px] rounded-lg border border-[#1f2945]/70 bg-[#07111f]/70 p-4">
+                    <div className="mb-3 flex items-center justify-between border-b border-[#1f2945]/50 pb-2">
+                      <h3 className="text-xs font-bold text-cyan-300">공시</h3>
+                      <span className="text-[10px] font-mono text-slate-500">DART</span>
+                    </div>
+                    <div className="flex min-h-[150px] flex-col items-center justify-center gap-2 text-center">
+                      <p className="text-xs font-mono text-slate-500">
+                        해당 종목의 DART 공시 연동을 준비 중입니다.
+                      </p>
+                      <p className="max-w-[320px] text-[11px] leading-5 text-slate-600">
+                        stock_code와 corp_code 매핑 후 최근 공시 목록이 이 영역에 표시됩니다.
+                      </p>
+                    </div>
+                  </section>
                 </div>
               )}
 
@@ -1745,19 +1791,27 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
                       name="orderType"
                       value="MARKET"
                       checked={orderType === 'MARKET'}
-                      onChange={() => setOrderType('MARKET')}
+                      onChange={() => {
+                        if (exchange !== 'COINONE') setOrderType('MARKET')
+                      }}
+                      disabled={exchange === 'COINONE'}
                       className="accent-cyan-400"
                     />
                     시장가
                   </label>
                 </div>
               </div>
+              {exchange === 'COINONE' && (
+                <p className="text-[10px] leading-relaxed text-slate-500">
+                  코인원 실주문은 안전 검증이 완료된 지정가 주문만 지원합니다.
+                </p>
+              )}
 
               {/* 주문 제출 폼 */}
               <form onSubmit={handlePlaceOrder} className="flex flex-col gap-4">
                 {/* 1. 가격 입력 */}
                 <div className="flex flex-col gap-1.5">
-                  <span className="text-[10px] text-slate-400 font-bold">주문 단가 ({resolvedAssetType === 'STOCK' ? 'KRW' : 'USD'})</span>
+                  <span className="text-[10px] text-slate-400 font-bold">주문 단가 ({orderCurrencyCode})</span>
                   <input
                     type="number"
                     disabled={orderType === 'MARKET'}
@@ -1946,7 +2000,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
 
                 {/* 결과 메세지 */}
                 {tradeMessage.text && (
-                  <div className={`p-2.5 rounded text-xs font-bold leading-relaxed border ${tradeMessage.isError ? 'bg-red-950/40 text-red-400 border-red-900/60' : 'bg-green-950/40 text-green-400 border-green-900/60'}`}>
+                  <div className={`whitespace-pre-line p-2.5 rounded text-xs font-bold leading-relaxed border ${tradeMessage.isError ? 'bg-red-950/40 text-red-400 border-red-900/60' : 'bg-green-950/40 text-green-400 border-green-900/60'}`}>
                     {tradeMessage.text}
                   </div>
                 )}

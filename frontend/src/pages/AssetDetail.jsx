@@ -31,6 +31,12 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
     return 4;
   };
 
+  const formatUnitPrice = (value) => {
+    const numeric = Number(value)
+    if (!Number.isFinite(numeric)) return '-'
+    return `${getCurrencySign()}${numeric.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 1 })}`
+  }
+
   // 1. 거래소 기본값 세팅 (주식은 TOSS 실거래를 기본값으로, 코인은 COINONE)
   const defaultExchange = normalizedRouteAssetType === 'STOCK' ? 'TOSS' : 'COINONE'
   const [exchange, setExchange] = useState(defaultExchange)
@@ -1472,7 +1478,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
             <div className="flex flex-col">
               <span className="text-[10px] text-slate-400 font-bold">현재가</span>
               <span className="text-lg font-bold font-mono text-white mt-0.5">
-                {getCurrencySign()}{currentPrice.toLocaleString(undefined, { maximumFractionDigits: getCurrencyDigits() })}
+                {formatUnitPrice(currentPrice)}
               </span>
             </div>
 
@@ -2149,7 +2155,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
                       <div className="flex justify-between text-slate-300">
                         <span>기준가</span>
                         <span className="text-white">
-                          {getCurrencySign()}{Number(orderPrecheck.reference_price || 0).toLocaleString(undefined, { maximumFractionDigits: getCurrencyDigits() })}
+                          {formatUnitPrice(orderPrecheck.reference_price || 0)}
                         </span>
                       </div>
                       <div className="flex justify-between text-slate-300">
@@ -2332,7 +2338,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
                   <div className="flex justify-between border-b border-[#1f2945]/30 py-1">
                     <span className="text-slate-400">평균 단가</span>
                     <span className="text-white font-bold">
-                      {getCurrencySign()}{Number(myHolding.avg_price || 0).toLocaleString(undefined, { maximumFractionDigits: getCurrencyDigits() })}
+                      {formatUnitPrice(myHolding.avg_price)}
                       {exchange === 'BINANCE_UM_FUTURES' && myHolding.avg_price_source === 'ACCOUNT_FALLBACK' && (
                         <span className="ml-1 text-[9px] text-amber-300">추정</span>
                       )}
@@ -2367,7 +2373,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
                   {dbEstimatedHolding.avgPrice > 0 ? (
                     <div className="flex justify-between border-b border-amber-400/20 py-1">
                       <span className="text-slate-300">추정 평균가</span>
-                      <span className="font-bold text-white">₩{dbEstimatedHolding.avgPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                      <span className="font-bold text-white">₩{dbEstimatedHolding.avgPrice.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 1 })}</span>
                     </div>
                   ) : null}
                   <p className="leading-relaxed text-amber-200">

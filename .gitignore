@@ -34,3 +34,7 @@ ml/models/*
 *.ntvsca
 *.njsproj
 *.sln
+
+# Custom Local Agent Skills
+.agents/
+

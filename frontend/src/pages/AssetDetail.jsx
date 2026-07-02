@@ -1077,10 +1077,10 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
     fetchUserBalance()
     fetchNewsList()
     fetchDisclosureList()
-    fetchSymbolMetadata()
   }, [exchange, symbol, chartInterval, brokerEnv, symbolLookupReady])
 
   useEffect(() => {
+    fetchSymbolMetadata()
     loadBrokerAvailability()
     loadTradeHoldingContext()
   }, [symbol])

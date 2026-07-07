@@ -2,6 +2,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import Header from '../components/Header.jsx'
 
 const assetTypeLabels = {
+  ALL: '전체 종목',
   STOCK: '주식',
   CRYPTO: '코인',
 }
@@ -10,7 +11,7 @@ export default function SearchNotFound({ isLoggedIn, userEmail, handleLogout }) 
   const { assetType: routeAssetType = '', symbol: routeSymbol = '' } = useParams()
   const [searchParams] = useSearchParams()
   const query = searchParams.get('query') || routeSymbol
-  const assetType = String(searchParams.get('assetType') || routeAssetType || 'STOCK').toUpperCase()
+  const assetType = String(searchParams.get('assetType') || routeAssetType || 'ALL').toUpperCase()
   const assetTypeLabel = assetTypeLabels[assetType] || '종목'
 
   return (
@@ -36,7 +37,7 @@ export default function SearchNotFound({ isLoggedIn, userEmail, handleLogout }) 
                   검색 결과가 없습니다.
                 </h1>
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-                  입력한 {assetTypeLabel} 종목명이나 코드가 현재 등록된 종목 데이터와 일치하지 않습니다.
+                  입력한 종목명이나 코드가 현재 등록된 {assetTypeLabel} 데이터와 일치하지 않습니다.
                   종목명 또는 코드를 다시 확인해 주세요.
                 </p>
               </div>

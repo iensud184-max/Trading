@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useEffectEvent, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { createChart, CandlestickSeries } from 'lightweight-charts'
-import { supabase, deleteUserWatchlistItem, ensureNewsSummaries, fetchUserWatchlist, upsertUserWatchlistItem } from '../supabaseClient'
+import { supabase, deleteUserWatchlistItem, ensureNewsSummaries, fetchUserWatchlist, normalizeWatchlistItem, upsertUserWatchlistItem } from '../supabaseClient'
 import Header from '../components/Header.jsx'
 import { getApiErrorMessage } from '../lib/apiError.js'
 
@@ -809,11 +809,17 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
       return
     }
     try {
+      const favoritePayload = normalizeWatchlistItem({
+        symbol,
+        name: displayName,
+        exchange,
+        asset_type: resolvedAssetType,
+      })
       const items = await fetchUserWatchlist()
       const hasMatch = items.some(item => 
-        item.id === symbol && 
-        item.assetType === resolvedAssetType && 
-        item.exchange === exchange
+        item.id === favoritePayload.symbol &&
+        item.assetType === favoritePayload.asset_type &&
+        item.exchange === favoritePayload.exchange
       )
       setIsFavorite(hasMatch)
     } catch (e) {
@@ -861,7 +867,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
       return
     }
 
-    const itemPayload = {
+    const itemPayload = normalizeWatchlistItem({
       symbol: symbol,
       name: displayName,
       exchange: exchange,
@@ -870,7 +876,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
       change_rate: priceChangeRate || null,
       average_price: currentPrice || null,
       quantity: 0
-    }
+    })
 
     try {
       if (isFavorite) {
@@ -2975,7 +2981,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
                                 '해지 규모': ['해지금액', '매출액대비'],
                                 '해지 사유': ['해지사유'],
                                 '사채 규모': ['사채의 권면총액'],
-                                '전환 조건': ['전환가액', '행사가액', '교환가액'],
+                                '전환 조건': ['전환가액', '행사가액', '교환가액', '청구금액'],
                                 '청구 기간': ['전환청구기간', '행사청구기간'],
                                 '최종 발행가': ['확정발행가액', '발행가액'],
                                 '발행 주식 수': ['발행주식수', '신주의 수'],
@@ -3016,6 +3022,11 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
                                 '보증 규모': ['채무보증금액', '자기자본대비'],
                                 '보증 대상': ['채무자', '채권자'],
                                 '보증 기간': ['채무보증기간'],
+                                '발행 결과': ['실제발행금액', '실제발행주식수'],
+                                '납입 일정': ['납입일', '상장예정일'],
+                                '발행 규모': ['발행총액'],
+                                '조달 목적': ['자금조달의 목적'],
+                                '행사 물량': ['행사주식수', '발행주식총수 대비'],
                                 '실적 규모': ['매출액', '영업이익', '당기순이익'],
                                 '증감 방향': ['전년동기대비', '직전분기대비'],
                                 '변동 규모': ['영업이익', '당기순이익', '전년대비'],

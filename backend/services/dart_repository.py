@@ -118,16 +118,29 @@ class DartRepository:
         return rows[0] if rows else None
 
     def _get_disclosure_analysis_legacy(self, rcept_no: str) -> dict[str, Any] | None:
+        base_params = {
+            "rcept_no": f"eq.{str(rcept_no or '').strip()}",
+            "limit": "1",
+        }
         response = requests.get(
             f"{self.supabase_url}/rest/v1/dart_disclosure_analyses",
             headers=self._read_headers(),
             params={
-                "select": "id,rcept_no,category,sentiment,sentiment_label,sentiment_message,confidence,headline,key_points,risk_points,metrics,analysis_source,raw_payload,analyzed_at",
-                "rcept_no": f"eq.{str(rcept_no or '').strip()}",
-                "limit": "1",
+                **base_params,
+                "select": "id,rcept_no,category,sentiment,sentiment_label,sentiment_message,confidence,headline,plain_summary,key_points,risk_points,metrics,analysis_source,raw_payload,analyzed_at",
             },
             timeout=15,
         )
+        if response.status_code == 400:
+            response = requests.get(
+                f"{self.supabase_url}/rest/v1/dart_disclosure_analyses",
+                headers=self._read_headers(),
+                params={
+                    **base_params,
+                    "select": "id,rcept_no,category,sentiment,sentiment_label,sentiment_message,confidence,headline,key_points,risk_points,metrics,analysis_source,raw_payload,analyzed_at",
+                },
+                timeout=15,
+            )
         response.raise_for_status()
         rows = response.json()
         return rows[0] if rows else None
@@ -157,7 +170,7 @@ class DartRepository:
         legacy_row = {
             key: value
             for key, value in row.items()
-            if key not in {"plain_summary", "check_items"}
+            if key != "check_items"
         }
         response = requests.post(
             f"{self.supabase_url}/rest/v1/dart_disclosure_analyses?on_conflict=rcept_no",
@@ -165,6 +178,18 @@ class DartRepository:
             json=legacy_row,
             timeout=30,
         )
+        if response.status_code == 400:
+            legacy_row = {
+                key: value
+                for key, value in legacy_row.items()
+                if key != "plain_summary"
+            }
+            response = requests.post(
+                f"{self.supabase_url}/rest/v1/dart_disclosure_analyses?on_conflict=rcept_no",
+                headers={**self._write_headers(), "Prefer": "resolution=merge-duplicates,return=representation"},
+                json=legacy_row,
+                timeout=30,
+            )
         self._raise_for_status(response, "dart_disclosure_analyses")
         rows = response.json()
         return rows[0] if rows else None

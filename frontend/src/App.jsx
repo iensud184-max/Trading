@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
-import { BrowserRouter as Router, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { BrowserRouter as Router, Navigate, Route, Routes } from 'react-router-dom'
 import { supabase } from './supabaseClient'
 import Dashboard from './pages/Dashboard'
 import Login from './pages/Login'
@@ -31,8 +31,6 @@ function AppShell({
   setInfoSubmitLoading,
   handleLogout,
 }) {
-  const location = useLocation()
-
   const handlePhoneFormatChange = (e) => {
     const value = e.target.value.replace(/[^0-9]/g, '')
     let formatted = value
@@ -318,7 +316,7 @@ export default function App() {
         try {
           const { data } = await supabase
             .from('profiles')
-            .select('nickname, phone, invest_type, invest_score, updated_at')
+            .select('nickname, phone, role, invest_type, invest_score, updated_at')
             .eq('id', session.user.id)
             .maybeSingle()
 

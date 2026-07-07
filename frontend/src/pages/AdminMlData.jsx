@@ -163,22 +163,22 @@ const automationPresets = [
   },
   {
     key: 'kr-stock-v1-full',
-    label: '국내 주식 v1 자동 수집+학습 (분리)',
-    summary: '국내 주식 3분리 자동 수집 후 학습까지 한 번에 실행',
+    label: '국내주식 v1 자동 수집+학습',
+    summary: 'stock_kr_core_45 + DART 공시 피처를 포함한 국내주식 shadow 모델',
     version: 'split-v1',
     isNew: true,
   },
   {
     key: 'us-stock-v1-full',
-    label: '미국 주식 v1 자동 수집+학습 (분리)',
-    summary: '미국 주식 3분리 자동 수집 후 학습까지 한 번에 실행',
+    label: '해외주식 v1 자동 수집+학습',
+    summary: 'stock_us_core_45 기반 해외주식 shadow 모델. DART 피처는 제외합니다.',
     version: 'split-v1',
     isNew: true,
   },
 ]
 
-const operationalAutomationPresets = automationPresets.filter((preset) => preset.version === 'v8' || preset.version === 'split-v1')
-const legacyAutomationPresets = automationPresets.filter((preset) => preset.version !== 'v8')
+const operationalAutomationPresets = automationPresets.filter((preset) => ['v8', 'split-v1'].includes(preset.version))
+const legacyAutomationPresets = automationPresets.filter((preset) => !['v8', 'split-v1'].includes(preset.version))
 const v8TuningPresets = tuningPresets.filter((preset) => preset.version === 'v8')
 
 function StatusPanel({ result, error, loading }) {

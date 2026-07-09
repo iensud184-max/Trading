@@ -48,7 +48,7 @@ function ChatMessage({ message, onAction }) {
         <div
           className={`whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-xs leading-5 ${
             isUser
-              ? 'bg-ai-cyan text-[#07111f]'
+              ? 'bg-blue-600 text-[#ffffff]'
               : 'border border-slate-700/80 bg-[#111827] text-slate-100'
           }`}
         >

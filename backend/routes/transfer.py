@@ -157,6 +157,8 @@ def _validate_withdraw_payload(data: dict) -> dict:
 
     if not currency:
         raise ValueError("출금 코인을 선택해 주세요.")
+    if currency != "XRP":
+        raise ValueError("코인원-바이낸스 이체는 현재 리플(XRP)만 지원합니다.")
     if (from_exchange, to_exchange) not in SUPPORTED_TRANSFER_PAIRS:
         raise ValueError(f"{from_exchange}에서 {to_exchange}로의 출금은 현재 지원하지 않습니다.")
     if amount <= 0:

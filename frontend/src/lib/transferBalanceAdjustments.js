@@ -44,7 +44,7 @@ export const deductCoinoneTransfersFromEstimatedHoldings = (mergedBalance, trans
     const toExchange = String(row.to_exchange || '').toUpperCase()
     const currency = String(row.currency || '').trim().toUpperCase()
     const amount = getCoinoneTransferDeductionAmount(row)
-    if (!fromExchange.includes('COINONE') || !toExchange.includes('BINANCE') || !currency || amount <= 0) return
+    if (!fromExchange.includes('COINONE') || !toExchange.includes('BINANCE') || currency !== 'XRP' || amount <= 0) return
     deductions.set(currency, (deductions.get(currency) || 0) + amount)
   })
 

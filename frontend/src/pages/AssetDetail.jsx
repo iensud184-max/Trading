@@ -205,6 +205,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
   const [stopLossRate, setStopLossRate] = useState(-3.0)
   const [autoExitExecutionMode, setAutoExitExecutionMode] = useState('PROPOSAL')
   const [autoExitRateType, setAutoExitRateType] = useState('PRICE') // PRICE | ROE
+  const [autoRestartOnPartialFill, setAutoRestartOnPartialFill] = useState(true)
   const [futuresIntent, setFuturesIntent] = useState('LONG_OPEN')
   const [futuresLeverage, setFuturesLeverage] = useState(1)
   const [futuresMarginType, setFuturesMarginType] = useState('CROSSED')
@@ -340,6 +341,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
   const [addRuleProfitRate, setAddRuleProfitRate] = useState('5.0')
   const [addRuleStopRate, setAddRuleStopRate] = useState('-3.0')
   const [addRuleExecutionMode, setAddRuleExecutionMode] = useState('PROPOSAL')
+  const [addRuleAutoRestart, setAddRuleAutoRestart] = useState(true)
 
   const handleAddRule = async () => {
     if (!addRulePrice || parseFloat(addRulePrice) <= 0) {
@@ -377,6 +379,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
           target_profit_rate: parseFloat(addRuleProfitRate),
           stop_loss_rate: parseFloat(addRuleStopRate),
           execution_mode: addRuleExecutionMode,
+          auto_restart_on_partial_fill: addRuleAutoRestart,
           broker_env: brokerEnv,
         }),
       })
@@ -385,6 +388,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
         setShowAddRuleForm(false)
         setAddRulePrice('')
         setAddRuleQty('')
+        setAddRuleAutoRestart(true)
         loadAutoTradingRules()
       } else {
         alert(result.message || '조건감시 규칙 등록에 실패했습니다.')
@@ -2589,6 +2593,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
             : parseFloat(stopLossRate)
         ) : null,
         auto_exit_execution_mode: autoExit ? autoExitExecutionMode : 'PROPOSAL',
+        auto_restart_on_partial_fill: autoExit ? autoRestartOnPartialFill : false,
         position_side: exchange === 'BINANCE_UM_FUTURES' ? 'BOTH' : null,
         reduce_only: exchange === 'BINANCE_UM_FUTURES' ? effectiveReduceOnly : false,
         leverage: exchange === 'BINANCE_UM_FUTURES' ? Number(futuresLeverage) : null,
@@ -2613,6 +2618,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
           isError: false
         })
         setQuantity('')
+        setAutoRestartOnPartialFill(true)
         fetchUserBalance() // 주문 성공 시 보유 자산 즉시 갱신
         loadOpenOrders()
         loadAutoTradingRules()
@@ -3202,6 +3208,19 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
                         className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white focus:border-cyan-400 focus:outline-none"
                       />
                     </div>
+                  </div>
+
+                  <div className="mt-2.5 flex items-center gap-2 select-none cursor-pointer">
+                    <input
+                      type="checkbox"
+                      id="rule-auto-restart"
+                      checked={addRuleAutoRestart}
+                      onChange={(e) => setAddRuleAutoRestart(e.target.checked)}
+                      className="accent-cyan-400 rounded"
+                    />
+                    <label htmlFor="rule-auto-restart" className="text-[10px] text-slate-400 font-bold cursor-pointer">
+                      부분 체결 시 남은 수량 자동 재감시
+                    </label>
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2.5 items-center justify-between border-t border-[#1f2945]/40 pt-2.5">
@@ -4657,6 +4676,19 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
                             </div>
                           </div>
                         )}
+
+                        <div className="flex items-center gap-2 px-1 py-0.5 select-none cursor-pointer">
+                          <input
+                            type="checkbox"
+                            id="order-auto-restart"
+                            checked={autoRestartOnPartialFill}
+                            onChange={(e) => setAutoRestartOnPartialFill(e.target.checked)}
+                            className="accent-cyan-400 rounded"
+                          />
+                          <label htmlFor="order-auto-restart" className="text-[10px] text-slate-400 font-bold cursor-pointer">
+                            부분 체결 시 남은 수량 자동 재감시
+                          </label>
+                        </div>
 
                         <div className="grid grid-cols-2 gap-2 bg-[#070b19] border border-[#1f2945] rounded p-2.5">
                           <div className="flex flex-col gap-1">

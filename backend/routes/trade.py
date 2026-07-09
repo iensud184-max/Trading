@@ -1,5 +1,6 @@
 import re
 import os
+import uuid
 import time
 import threading
 import requests
@@ -1740,6 +1741,7 @@ def place_manual_order():
             "post_order_status_check": kis_status_detail,
         }
 
+    proposal_id = str(uuid.uuid4())
     auto_exit_result = None
     auto_exit = data.get("auto_exit", False)
     if auto_exit and action.upper() == "BUY":
@@ -1770,6 +1772,7 @@ def place_manual_order():
                 "target_profit_rate": target_profit_rate,
                 "stop_loss_rate": stop_loss_rate,
                 "execution_mode": execution_mode,
+                "entry_order_proposal_id": proposal_id,
                 "status": "RUNNING"
             }
             # Supabase에 감시 조건 등록
@@ -1807,6 +1810,7 @@ def place_manual_order():
         currency = "KRW" if (exchange not in ("BINANCE", "BINANCE_UM_FUTURES") and market_country != "US") else "USD"
         
         proposal_data = {
+            "id": proposal_id,
             "user_id": user_id,
             "exchange": exchange,
             "asset_type": asset_type,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import Header from '../components/Header.jsx'
-import { ensureNewsSummaries, fetchNewsArticles } from '../lib/supabaseClient.js'
+import Header from '../../components/Header.jsx'
+import { ensureNewsSummaries, fetchNewsArticles } from '../../lib/supabaseClient.js'
 
 const PAGE_SIZE = 10
 
@@ -174,17 +174,16 @@ export default function News({ isLoggedIn, userEmail, handleLogout, hideHeader =
       {!hideHeader ? <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} /> : null}
 
       <main className="mx-auto max-w-7xl">
-        <section className={`ai-glass rounded-lg ${mobileLayout ? 'p-3' : 'p-4 sm:p-6'}`}>
-          <div className={`${mobileLayout ? 'mb-4 gap-3' : 'mb-5 gap-4'} grid`}>
-            <div className={`grid gap-3 ${mobileLayout ? '' : 'lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end'}`}>
-            <div className="min-w-0">
-              <h2 className={`${mobileLayout ? 'text-xl' : 'text-2xl'} font-bold text-white`}>News Board</h2>
+        <section className="ai-glass rounded-lg p-4 sm:p-6">
+          <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-white">News Board</h2>
               <p className="mt-1 text-sm text-slate-400">
                 Supabase에 적재된 국내·해외 뉴스를 게시판 형태로 보여줍니다.
               </p>
             </div>
 
-              <div className={`grid min-w-0 gap-2 ${mobileLayout ? '' : 'sm:grid-cols-[140px_170px_minmax(240px,360px)]'}`}>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[140px_170px_minmax(220px,1fr)]">
               <select
                 value={newsMarket}
                 onChange={(event) => {
@@ -231,21 +230,21 @@ export default function News({ isLoggedIn, userEmail, handleLogout, hideHeader =
                 placeholder="종목명, 티커, 키워드 검색"
                 className="min-w-0 rounded border border-slate-700 bg-[#0F172A] px-3 py-2 text-sm text-white"
               />
-              </div>
             </div>
+          </div>
 
-            <div className={`rounded-lg border border-slate-800 bg-[#0c1019]/80 ${mobileLayout ? 'p-3' : 'p-4'}`}>
-              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-              <div className="min-w-0">
+          <div className="mb-6 rounded-xl border border-slate-800 bg-[#0c1019]/80 p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
                 <h3 className="text-sm font-semibold text-white">카테고리 기준</h3>
-                <p className="mt-1 text-xs leading-5 text-slate-400">검색 아래에서 각 카테고리 의미를 바로 확인할 수 있습니다.</p>
+                <p className="mt-1 text-xs text-slate-400">검색 아래에서 각 카테고리 의미를 바로 확인할 수 있습니다.</p>
               </div>
-                <div className={`${mobileLayout ? 'grid gap-2' : 'flex items-center gap-3'}`}>
-                <div className="text-[11px] leading-5 text-slate-500">종목은 검색창 직접 입력이 더 정확합니다.</div>
+              <div className="flex items-center gap-3">
+                <div className="text-[11px] text-slate-500">종목은 검색창 직접 입력이 더 정확합니다.</div>
                 <button
                   type="button"
                   onClick={() => setIsCategoryGuideOpen((prev) => !prev)}
-                    className={`${mobileLayout ? 'w-full' : ''} rounded border border-slate-700 px-3 py-1.5 text-[11px] text-slate-300 hover:border-ai-cyan/50 hover:text-white`}
+                  className="rounded border border-slate-700 px-3 py-1.5 text-[11px] text-slate-300 hover:border-ai-cyan/50 hover:text-white"
                 >
                   {isCategoryGuideOpen ? '접기' : '펼치기'}
                 </button>
@@ -253,7 +252,7 @@ export default function News({ isLoggedIn, userEmail, handleLogout, hideHeader =
             </div>
 
             {isCategoryGuideOpen ? (
-                <div className={`mt-3 grid gap-2 ${mobileLayout ? '' : 'sm:grid-cols-2 xl:grid-cols-3'}`}>
+              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3">
                 {categoryGuide.map((item) => {
                   const isActive = newsCategory === item.key
                   return (
@@ -272,7 +271,6 @@ export default function News({ isLoggedIn, userEmail, handleLogout, hideHeader =
                 })}
               </div>
             ) : null}
-            </div>
           </div>
 
           <div className="mb-4 text-xs text-slate-500">

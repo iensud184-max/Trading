@@ -1,5 +1,5 @@
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import Header from '../components/Header.jsx'
+import Header from '../../components/Header.jsx'
 
 const assetTypeLabels = {
   ALL: '전체 종목',

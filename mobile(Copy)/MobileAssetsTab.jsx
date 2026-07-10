@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { supabase } from '../supabaseClient'
-import { Rate, SectionHeader } from '../components/DashboardComponents.jsx'
-import { getApiErrorMessage } from '../lib/apiError.js'
-import AssetLogo from '../components/AssetLogo.jsx'
+import { supabase } from '../../supabaseClient'
+import { Rate, SectionHeader } from '../../components/DashboardComponents.jsx'
+import { getApiErrorMessage } from '../../lib/apiError.js'
+import AssetLogo from '../../components/AssetLogo.jsx'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5050'
 const TAG_REQUIRED_SYMBOLS = new Set(['XRP', 'XLM', 'EOS'])
@@ -497,7 +497,6 @@ export default function AssetsTab({
         rawExchange,
         quantity: `${stock.qty}`,
         average: formatUnitCurrency(stock.avg_price, stockCurrency, currentDisplayCurrency),
-        currentPrice: formatUnitCurrency(stock.current_price, stockCurrency, currentDisplayCurrency),
         profit: formatCurrency(stock.profit, stockCurrency, currentDisplayCurrency),
         returnRate: `${profitRate >= 0 ? '+' : ''}${Number.isFinite(profitRate) ? profitRate.toFixed(2) : '0.00'}%`,
       }
@@ -538,13 +537,13 @@ export default function AssetsTab({
     : 'conic-gradient(#334155 0% 100%)'
 
   return (
-    <main className={`max-w-7xl mx-auto flex flex-col ${mobileLayout ? 'gap-4' : 'gap-6'}`}>
-      <div className={`grid ${mobileLayout ? 'gap-4' : 'gap-6'} xl:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]`}>
+    <main className={`max-w-7xl mx-auto flex flex-col ${mobileLayout ? 'gap-3' : 'gap-6'}`}>
+      <div className={`grid grid-cols-1 ${mobileLayout ? 'gap-3' : 'gap-6'}`}>
       <section className={`bg-slate-surface border border-slate-700/80 rounded-lg ${mobileLayout ? 'p-3' : 'p-5'}`}>
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className={`${mobileLayout ? 'mb-2 gap-2' : 'mb-4 gap-3'} flex flex-col sm:flex-row sm:items-start sm:justify-between`}>
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-ai-cyan">Private Asset</p>
-            <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className={`${mobileLayout ? 'mt-0.5 gap-1.5' : 'mt-1 gap-2'} flex flex-col sm:flex-row sm:items-center`}>
               <h2 className="text-sm font-bold uppercase tracking-wider text-white">계좌별 자산 요약</h2>
               {setShowMockAssets ? (
                 <div className="inline-flex w-fit rounded-md border border-slate-700/80 bg-[#0f172a] p-1">
@@ -587,7 +586,7 @@ export default function AssetsTab({
             </span>
           </div>
         </div>
-        <div className="grid gap-3">
+        <div className={`grid ${mobileLayout ? 'grid-cols-1 gap-2' : 'gap-3'}`}>
           {balanceLoading ? (
             <div className="rounded-lg border border-slate-800 bg-[#0f172a] p-4 text-center">
               <div className="flex flex-col items-center justify-center gap-2 py-4 text-slate-400">
@@ -601,20 +600,20 @@ export default function AssetsTab({
               <p className="mt-1 text-xs text-slate-500">거래소 API 키를 연결하고 새로 고침하면 계좌별 자산이 표시됩니다.</p>
             </div>
           ) : displayAccounts.map((account) => (
-            <div key={account.id} className="rounded-lg border border-slate-800 bg-[#0f172a] p-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div key={account.id} className={`rounded-lg border border-slate-800 bg-[#0f172a] ${mobileLayout ? 'px-3 py-2.5' : 'p-4'}`}>
+              <div className={`${mobileLayout ? 'gap-1.5' : 'gap-3'} flex flex-col md:flex-row md:items-center md:justify-between`}>
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-bold text-white">{account.title}</p>
-                    <span className="rounded-md bg-ai-cyan/10 px-2 py-1 text-xs font-bold text-ai-cyan">{account.accountType}</span>
+                    <p className={`${mobileLayout ? 'text-xs' : ''} font-bold text-white`}>{account.title}</p>
+                    <span className={`rounded-md bg-ai-cyan/10 ${mobileLayout ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-1 text-xs'} font-bold text-ai-cyan`}>{account.accountType}</span>
                   </div>
-                  {account.sourceText ? (
+                  {account.sourceText && !mobileLayout ? (
                     <p className="mt-2 text-xs text-slate-500">{account.sourceText}</p>
                   ) : null}
                 </div>
                 <div className="md:text-right">
-                  <p className="text-xs font-bold text-slate-500">{account.balanceLabel}</p>
-                  <p className="mt-1 text-xl font-extrabold text-white font-mono">{account.balance}</p>
+                  <p className="text-[10px] font-bold text-slate-500">{account.balanceLabel}</p>
+                  <p className={`mt-1 ${mobileLayout ? 'text-sm' : 'text-xl'} font-extrabold text-white font-mono`}>{account.balance}</p>
                 </div>
               </div>
             </div>
@@ -624,18 +623,30 @@ export default function AssetsTab({
 
       <section className={`bg-slate-surface border border-slate-700/80 rounded-lg ${mobileLayout ? 'p-3' : 'p-5'}`}>
         <SectionHeader title="자산 배분 상태" />
-        <div className="mt-4 flex justify-center">
-          <div
-            className="flex aspect-square w-full max-w-[220px] items-center justify-center rounded-full border border-slate-700/70 shadow-inner"
-            style={{ background: allocationGradient }}
-          >
-            <div className="flex h-[62%] w-[62%] flex-col items-center justify-center rounded-full border border-slate-800 bg-[#0f172a] text-center">
-              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Total</span>
-              <span className="font-mono text-lg font-black text-white">100%</span>
+        {mobileLayout ? (
+          <div className="mt-3 flex h-3 overflow-hidden rounded-full border border-slate-800 bg-[#0c0e15]">
+            {allocation.map((item) => (
+              <span
+                key={item.id}
+                className={`${item.color} h-full transition-all`}
+                style={{ width: `${item.value}%` }}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="mt-4 flex justify-center">
+            <div
+              className="flex aspect-square w-full max-w-[220px] items-center justify-center rounded-full border border-slate-700/70 shadow-inner"
+              style={{ background: allocationGradient }}
+            >
+              <div className="flex h-[62%] w-[62%] flex-col items-center justify-center rounded-full border border-slate-800 bg-[#0f172a] text-center">
+                <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Total</span>
+                <span className="font-mono text-lg font-black text-white">100%</span>
+              </div>
             </div>
           </div>
-        </div>
-        <div className="mt-5 grid gap-2">
+        )}
+        <div className={`${mobileLayout ? 'mt-2 grid-cols-1' : 'mt-5'} grid gap-2`}>
           {allocation.map((item) => (
             <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg bg-[#0f172a] px-3 py-2.5">
               <span className="flex min-w-0 items-center gap-2 text-xs font-bold text-white">
@@ -656,8 +667,82 @@ export default function AssetsTab({
         <div className="p-5 pb-2">
           <SectionHeader title="투자종목 보유 현황" />
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] table-fixed border-collapse text-sm">
+        {mobileLayout ? (
+          <div className="grid gap-2 px-3 pb-3">
+            {balanceLoading ? (
+              <div className="rounded-lg border border-slate-800 bg-[#0f172a] px-4 py-8 text-center">
+                <div className="flex flex-col items-center justify-center gap-2 text-slate-400">
+                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-600 border-t-ai-cyan" />
+                  <p className="text-sm font-bold text-slate-300">데이터를 불러오는 중입니다.</p>
+                </div>
+              </div>
+            ) : sortedHoldings.length === 0 ? (
+              <div className="rounded-lg border border-slate-800 bg-[#0f172a] px-4 py-8 text-center">
+                <p className="text-sm font-bold text-slate-300">표시할 보유 종목이 없습니다.</p>
+                <p className="mt-1 text-xs text-slate-500">계좌를 연결하거나 새로 고침하면 보유 종목이 표시됩니다.</p>
+              </div>
+            ) : sortedHoldings.map((item) => {
+              const itemExchange = normalizeExchangeCode(item.rawExchange || item.exchange)
+              const canWithdraw = ['COINONE', 'BINANCE'].includes(itemExchange)
+                && String(item.assetType || '').toUpperCase() === 'CRYPTO'
+                && item.source === 'LIVE_BALANCE'
+                && parseNumeric(item.quantity) > 0
+                && (itemExchange === 'COINONE' || String(item.id || '').toUpperCase() === 'XRP')
+              const transferRoute = getTransferRoute(item)
+
+              return (
+                <article key={item.rowId || item.id} className="rounded-lg border border-slate-800 bg-[#0f172a] p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <AssetLogo symbol={item.id} assetType={item.assetType} name={item.name} size="h-9 w-9" />
+                      <div className="min-w-0">
+                        <Link to={`/asset/${item.assetType || 'STOCK'}/${item.id}`} className="block truncate text-sm font-bold text-blue-400 no-underline">
+                          {item.name}
+                        </Link>
+                        <div className="mt-0.5 flex min-w-0 items-center gap-2">
+                          <span className="truncate font-mono text-[10px] text-slate-500">{item.id}</span>
+                          <span className="rounded border border-slate-700/60 bg-slate-800/60 px-1.5 py-0.5 text-[10px] font-bold uppercase text-slate-400">
+                            {item.exchange}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <Rate value={item.returnRate} />
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-2">
+                    <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md bg-slate-950/50 px-2.5 py-2">
+                      <p className="text-[10px] font-bold text-slate-500">수량</p>
+                      <p className="min-w-0 truncate text-right font-mono text-xs font-bold text-slate-100">{item.quantity}</p>
+                    </div>
+                    <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md bg-slate-950/50 px-2.5 py-2">
+                      <p className="text-[10px] font-bold text-slate-500">평균가</p>
+                      <p className="min-w-0 truncate text-right font-mono text-xs font-bold text-slate-100">{item.average}</p>
+                    </div>
+                    <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md bg-slate-950/50 px-2.5 py-2">
+                      <p className="text-[10px] font-bold text-slate-500">손익</p>
+                      <p className={`min-w-0 truncate text-right font-mono text-xs font-bold ${parseNumeric(item.profit) > 0 ? 'text-red-400' : parseNumeric(item.profit) < 0 ? 'text-blue-400' : 'text-white'}`}>
+                        {parseNumeric(item.profit) > 0 ? '+' : ''}{item.profit}
+                      </p>
+                    </div>
+                  </div>
+
+                  {canWithdraw ? (
+                    <button
+                      type="button"
+                      onClick={() => openWithdrawModal(item)}
+                      className="mt-3 w-full rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] font-bold text-amber-200 transition active:bg-amber-500/20"
+                    >
+                      {transferRoute?.toLabel || '외부'}로 출금
+                    </button>
+                  ) : null}
+                </article>
+              )
+            })}
+          </div>
+        ) : null}
+        <div className={mobileLayout ? 'hidden' : 'overflow-x-auto'}>
+          <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
             <thead className="block border-y border-slate-800 bg-[#0c0e15]/100 text-xs text-slate-400 [&>tr]:table [&>tr]:w-full [&>tr]:table-fixed">
               <tr>
                 <th className="px-5 py-3 text-left font-bold">투자종목 명</th>
@@ -670,7 +755,6 @@ export default function AssetsTab({
                   </button>
                 </th>
                 <th className="px-5 py-3 text-left font-bold">평균단가</th>
-                <th className="px-5 py-3 text-left font-bold">현재가</th>
                 <th className="px-5 py-3 text-left font-bold">
                   평가손익
                   <button onClick={() => handleSort('profit')} className="inline-flex flex-col ml-1 align-middle text-[8px] leading-[6px] text-slate-500 hover:text-white cursor-pointer select-none">
@@ -691,7 +775,7 @@ export default function AssetsTab({
             <tbody className="block max-h-[460px] overflow-y-auto [&>tr]:table [&>tr]:w-full [&>tr]:table-fixed">
               {balanceLoading ? (
                 <tr>
-                  <td colSpan="8" className="px-5 py-12 text-center">
+                  <td colSpan="7" className="px-5 py-12 text-center">
                     <div className="flex flex-col items-center justify-center gap-2 text-slate-400">
                       <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-600 border-t-ai-cyan" />
                       <p className="text-sm font-bold text-slate-300">데이터를 불러오는 중입니다.</p>
@@ -701,7 +785,7 @@ export default function AssetsTab({
                 </tr>
               ) : sortedHoldings.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="px-5 py-12 text-center">
+                  <td colSpan="7" className="px-5 py-12 text-center">
                     <div className="flex flex-col items-center justify-center gap-2 text-slate-400">
                       <p className="text-sm font-bold text-slate-300">표시할 보유 종목이 없습니다.</p>
                       <p className="text-xs text-slate-500">계좌를 연결했거나 새로 고침을 완료하면 실제 보유 종목이 표시됩니다.</p>
@@ -736,7 +820,6 @@ export default function AssetsTab({
                     </td>
                     <td className="px-5 py-4 font-mono">{item.quantity}</td>
                     <td className="px-5 py-4 font-mono">{item.average}</td>
-                    <td className="px-5 py-4 font-mono">{item.currentPrice}</td>
                     <td className={`px-5 py-4 font-mono font-semibold ${parseNumeric(item.profit) > 0 ? 'text-red-400' : parseNumeric(item.profit) < 0 ? 'text-blue-400' : 'text-white'}`}>
                       {parseNumeric(item.profit) > 0 ? '+' : ''}{item.profit}
                     </td>

@@ -1,10 +1,10 @@
 import { useState, useEffect, useEffectEvent, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { createChart, CandlestickSeries } from 'lightweight-charts'
-import { supabase, deleteUserWatchlistItem, ensureNewsSummaries, fetchUserWatchlist, normalizeWatchlistItem, upsertUserWatchlistItem } from '../supabaseClient'
-import Header from '../components/Header.jsx'
-import AssetLogo from '../components/AssetLogo.jsx'
-import { getApiErrorMessage } from '../lib/apiError.js'
+import { supabase, deleteUserWatchlistItem, ensureNewsSummaries, fetchUserWatchlist, normalizeWatchlistItem, upsertUserWatchlistItem } from '../../supabaseClient'
+import Header from '../../components/Header.jsx'
+import AssetLogo from '../../components/AssetLogo.jsx'
+import { getApiErrorMessage } from '../../lib/apiError.js'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5050'
 const OPEN_ORDER_SELECT_FIELDS = 'id,exchange,asset_type,ticker,symbol,side,price,volume,ord_type,currency,broker_env,external_order_id,status,created_at'
@@ -86,7 +86,7 @@ const isUsStockSymbol = (value, market = '') => {
   return !isDomesticStockSymbol(value)
 }
 
-export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userProfile }) {
+export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userProfile, hideHeader = false, mobileLayout = false }) {
   const { assetType, symbol } = useParams()
   const navigate = useNavigate()
   const normalizedRouteAssetType = String(assetType || '').toUpperCase() === 'STOCK' ? 'STOCK' : 'CRYPTO'
@@ -2681,6 +2681,12 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
     orderPrecheck?.insufficient_cash ||
     orderPrecheck?.insufficient_holding
   ))
+  const pageShellClassName = mobileLayout
+    ? 'min-h-screen bg-[#070b19] text-[#e2e2ec] font-inter'
+    : 'min-h-screen bg-[#070b19] text-[#e2e2ec] font-inter'
+  const pageContentClassName = mobileLayout
+    ? 'mx-auto max-w-[430px] px-0 py-0'
+    : 'max-w-7xl mx-auto px-4 py-4'
   const chartCardClassName = isChartExpanded
     ? 'fixed inset-3 z-50 flex flex-col gap-4 rounded-2xl border border-cyan-500/40 bg-[#0e1529] p-4 shadow-2xl shadow-cyan-950/40 backdrop-blur-xl sm:inset-6'
     : 'bg-[#0e1529]/90 border border-[#1f2945] rounded-xl p-4 flex flex-col gap-4 backdrop-blur-md'
@@ -2757,20 +2763,24 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
 
   if (!symbolLookupReady) {
     return (
-      <div className="min-h-screen bg-[#070b19] text-[#e2e2ec] font-inter">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} userProfile={userProfile} />
+      <div className={pageShellClassName}>
+        <div className={pageContentClassName}>
+          {!hideHeader ? (
+            <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} userProfile={userProfile} />
+          ) : null}
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-[#070b19] text-[#e2e2ec] font-inter">
-      <div className="max-w-7xl mx-auto px-4 py-4">
+    <div className={pageShellClassName}>
+      <div className={pageContentClassName}>
         
         {/* 상단 네비게이션 헤더 */}
-        <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} userProfile={userProfile} />
+        {!hideHeader ? (
+          <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} userProfile={userProfile} />
+        ) : null}
 
         {/* 뒤로가기 버튼 */}
         <div className="mt-2 mb-4">

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import Header from '../components/Header.jsx'
-import AssetLogo from '../components/AssetLogo.jsx'
-import { deleteUserWatchlistItem, fetchUserWatchlist, normalizeWatchlistItem, upsertUserWatchlistItem } from '../supabaseClient'
+import Header from '../../components/Header.jsx'
+import AssetLogo from '../../components/AssetLogo.jsx'
+import { deleteUserWatchlistItem, fetchUserWatchlist, normalizeWatchlistItem, upsertUserWatchlistItem } from '../../supabaseClient'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5050'
 

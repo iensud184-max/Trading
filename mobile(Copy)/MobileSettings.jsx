@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '../supabaseClient'
-import Header from '../components/Header.jsx'
-import InvestmentSurveyModal from '../components/InvestmentSurveyModal'
-import { getApiErrorMessage } from '../lib/apiError.js'
+import { supabase } from '../../supabaseClient'
+import Header from '../../components/Header.jsx'
+import InvestmentSurveyModal from '../../components/InvestmentSurveyModal'
+import { getApiErrorMessage } from '../../lib/apiError.js'
 
 export default function Settings({ isLoggedIn, userEmail, handleLogout, userProfile, setUserProfile, hideHeader, mobileLayout = false }) {
   // 브로커 연동 현황 상태

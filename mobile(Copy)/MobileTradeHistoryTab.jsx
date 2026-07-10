@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { supabase } from '../supabaseClient'
-import { buildApiErrorText } from '../lib/apiError.js'
-import AssetLogo from '../components/AssetLogo.jsx'
+import { supabase } from '../../supabaseClient'
+import { buildApiErrorText } from '../../lib/apiError.js'
+import AssetLogo from '../../components/AssetLogo.jsx'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5050'
 
@@ -364,6 +364,15 @@ export default function TradeHistoryTab({ mobileLayout = false }) {
     COINONE: 'border-sky-500/40 bg-sky-500/15 text-sky-300',
     BINANCE: 'border-yellow-400/40 bg-yellow-400/15 text-yellow-300',
     BINANCE_UM_FUTURES: 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300',
+  }
+  const exchangeOptions = ['ALL', 'TOSS', 'KIS', 'COINONE', 'BINANCE', 'BINANCE_UM_FUTURES']
+  const exchangeLabels = {
+    ALL: 'ALL',
+    TOSS: 'TOSS',
+    KIS: 'KIS',
+    COINONE: 'COINONE',
+    BINANCE: 'BINANCE',
+    BINANCE_UM_FUTURES: mobileLayout ? 'BINANCE FUT' : 'BINANCE_UM_FUTURES',
   }
 
   const mergeTrades = async (proposals = [], brokerOrders = [], transferRows = []) => {
@@ -771,10 +780,10 @@ export default function TradeHistoryTab({ mobileLayout = false }) {
         </section>
       ) : null}
 
-      <section className={`rounded-lg border border-slate-700 bg-slate-surface/90 ${mobileLayout ? 'p-3' : 'p-4'}`}>
-        <div className={`grid ${mobileLayout ? 'gap-3' : 'gap-3 xl:grid-cols-[minmax(0,1fr)_auto]'}`}>
-          <div className={`grid min-w-0 ${mobileLayout ? 'gap-2.5' : 'gap-2 lg:grid-cols-[minmax(220px,1fr)_auto] xl:grid-cols-[minmax(220px,320px)_auto_minmax(0,1fr)]'}`}>
-            <label className="flex h-10 min-w-0 items-center gap-2 rounded border border-slate-700 bg-[#0f172a] px-3 text-sm text-slate-500">
+      <section className={`rounded-lg border border-slate-700 bg-slate-surface/90 ${mobileLayout ? 'p-2.5' : 'p-2'}`}>
+        <div className={`flex flex-col ${mobileLayout ? 'gap-3' : 'gap-2 lg:flex-row lg:items-center lg:justify-between'}`}>
+          <div className={`flex flex-1 flex-col ${mobileLayout ? 'gap-2.5' : 'gap-2 md:flex-row md:items-center'}`}>
+            <label className={`flex items-center gap-2 rounded border border-slate-700 bg-[#0f172a] text-sm text-slate-500 ${mobileLayout ? 'h-11 w-full px-3.5' : 'h-10 min-w-52 px-3'}`}>
               <span>⌕</span>
               <input
                 className="w-full bg-transparent text-slate-200 outline-none placeholder:text-slate-500"
@@ -784,73 +793,73 @@ export default function TradeHistoryTab({ mobileLayout = false }) {
                 onChange={(event) => setTradeSearchQuery(event.target.value)}
               />
             </label>
-            <div className={`grid items-center gap-2 rounded border border-slate-700 bg-[#0f172a] px-3 py-2 text-sm font-bold text-slate-300 ${mobileLayout ? 'grid-cols-[1fr_auto_1fr]' : 'h-10 grid-cols-[128px_auto_128px]'}`}>
+            <div className={`flex items-center rounded border border-slate-700 bg-[#0f172a] text-sm font-bold text-slate-300 ${mobileLayout ? 'h-11 gap-1.5 px-3' : 'h-10 gap-2 px-3'}`}>
               <input
-                className="min-w-0 bg-transparent font-mono text-xs text-slate-200 outline-none [color-scheme:dark]"
+                className={`bg-transparent font-mono text-xs text-slate-200 outline-none [color-scheme:dark] ${mobileLayout ? 'min-w-0 flex-1 text-center' : 'w-32'}`}
                 type="date"
                 value={dateRange.start}
                 onChange={(event) => setDateRange((prev) => ({ ...prev, start: event.target.value }))}
               />
-              <span className="text-slate-600">-</span>
+              <span className="shrink-0 text-slate-600">-</span>
               <input
-                className="min-w-0 bg-transparent font-mono text-xs text-slate-200 outline-none [color-scheme:dark]"
+                className={`bg-transparent font-mono text-xs text-slate-200 outline-none [color-scheme:dark] ${mobileLayout ? 'min-w-0 flex-1 text-center' : 'w-32'}`}
                 type="date"
                 value={dateRange.end}
                 onChange={(event) => setDateRange((prev) => ({ ...prev, end: event.target.value }))}
               />
             </div>
-            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-slate-400">
-              <span className="shrink-0">Exchange:</span>
-              {['ALL', 'TOSS', 'KIS', 'COINONE', 'BINANCE', 'BINANCE_UM_FUTURES'].map((item) => (
+            <div className={`${mobileLayout ? 'grid grid-cols-2 gap-2 text-sm text-slate-400' : 'flex flex-wrap items-center gap-2 text-sm text-slate-400'}`}>
+              <span className={mobileLayout ? 'col-span-2 text-xs font-bold uppercase tracking-wide text-slate-500' : ''}>Exchange:</span>
+              {exchangeOptions.map((item) => (
                 <button
                   key={item}
-                  className={`rounded px-3 py-2 text-xs font-bold transition ${selectedExchange === item
+                  className={`rounded text-xs font-bold transition ${mobileLayout ? 'h-9 px-2.5' : 'px-3 py-2'} ${selectedExchange === item
                       ? 'bg-ai-cyan text-[#07111f]'
                       : 'bg-slate-700/70 text-slate-200 hover:bg-slate-600'
                     }`}
                   type="button"
                   onClick={() => setSelectedExchange(item)}
                 >
-                  {item}
+                  {exchangeLabels[item]}
                 </button>
               ))}
             </div>
           </div>
-          <div className={`grid gap-2 ${mobileLayout ? 'grid-cols-1' : 'sm:grid-cols-3 xl:w-[520px]'}`}>
-            <button
-              className={`h-10 rounded border px-4 text-sm font-bold transition ${
-                isMoreFiltersOpen
-                  ? 'border-ai-cyan bg-ai-cyan/10 text-ai-cyan'
-                  : 'border-slate-700 bg-[#0f172a] text-slate-200 hover:border-ai-cyan'
-              }`}
-              type="button"
-              onClick={() => setIsMoreFiltersOpen((prev) => !prev)}
-            >
-              More Filters
-            </button>
-            <button
-              className="h-10 rounded border border-blue-500/40 bg-blue-500/10 px-4 text-sm font-bold text-blue-300 transition hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:opacity-50"
-              type="button"
-              disabled={Boolean(actionLoadingId)}
-              onClick={handleSyncBrokerHistory}
-            >
-              {actionLoadingId === 'sync-broker-history' ? '토스 동기화 중' : '토스 원장 동기화'}
-            </button>
-            <button
-              className="h-10 rounded border border-cyan-500/40 bg-cyan-500/10 px-4 text-sm font-bold text-cyan-300 transition hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-50"
-              type="button"
-              disabled={Boolean(actionLoadingId)}
-              onClick={handleSyncOrderStatuses}
-            >
-              {actionLoadingId === 'sync-order-statuses' ? '상태 갱신 중' : '거래소 상태 갱신'}
-            </button>
-          </div>
+          <button
+            className={`rounded border px-4 text-sm font-bold transition ${
+              mobileLayout ? 'h-11 w-full' : 'h-10'
+            } ${
+              isMoreFiltersOpen
+                ? 'border-ai-cyan bg-ai-cyan/10 text-ai-cyan'
+                : 'border-slate-700 bg-[#0f172a] text-slate-200 hover:border-ai-cyan'
+            }`}
+            type="button"
+            onClick={() => setIsMoreFiltersOpen((prev) => !prev)}
+          >
+            More Filters
+          </button>
+          <button
+            className={`rounded border border-blue-500/40 bg-blue-500/10 px-4 text-sm font-bold text-blue-300 transition hover:bg-blue-500/15 disabled:cursor-not-allowed disabled:opacity-50 ${mobileLayout ? 'h-11' : 'h-10'}`}
+            type="button"
+            disabled={Boolean(actionLoadingId)}
+            onClick={handleSyncBrokerHistory}
+          >
+            {actionLoadingId === 'sync-broker-history' ? '토스 동기화 중' : '토스 원장 동기화'}
+          </button>
+          <button
+            className={`rounded border border-cyan-500/40 bg-cyan-500/10 px-4 text-sm font-bold text-cyan-300 transition hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-50 ${mobileLayout ? 'h-11' : 'h-10'}`}
+            type="button"
+            disabled={Boolean(actionLoadingId)}
+            onClick={handleSyncOrderStatuses}
+          >
+            {actionLoadingId === 'sync-order-statuses' ? '상태 갱신 중' : '거래소 상태 갱신'}
+          </button>
         </div>
         {isMoreFiltersOpen ? (
-          <div className="mt-3 flex justify-end border-t border-slate-800 pt-3">
-            <div className="w-full rounded border border-slate-800 bg-[#0f172a] p-3 md:max-w-4xl">
+          <div className={`${mobileLayout ? 'mt-2.5 border-t border-slate-800 pt-2.5' : 'mt-3 flex justify-end border-t border-slate-800 pt-3'}`}>
+            <div className={`w-full rounded border border-slate-800 bg-[#0f172a] ${mobileLayout ? 'p-2.5' : 'p-3 md:max-w-4xl'}`}>
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="flex flex-wrap items-center gap-2 md:ml-[25px]">
+                <div className={`flex flex-wrap items-center gap-2 ${mobileLayout ? '' : 'md:ml-[25px]'}`}>
                   <span className="w-10 text-xs font-bold text-slate-500">구분</span>
                   {['ALL', '매수', '매도', '출금', '입금'].map((item) => (
                     <button
@@ -867,7 +876,7 @@ export default function TradeHistoryTab({ mobileLayout = false }) {
                     </button>
                   ))}
                 </div>
-                <div className="flex flex-wrap items-center gap-2 md:flex-1 md:justify-end md:pr-[25px]">
+                <div className={`flex flex-wrap items-center gap-2 ${mobileLayout ? '' : 'md:flex-1 md:justify-end md:pr-[25px]'}`}>
                   <span className="w-10 text-xs font-bold text-slate-500">상태</span>
                   {['ALL', '주문 완료', '미체결', '체결완료', '취소완료', '전송중', '출금완료', '입금완료', '출금실패', '구매실패', '판매실패'].map((item) => (
                     <button
@@ -890,110 +899,216 @@ export default function TradeHistoryTab({ mobileLayout = false }) {
         ) : null}
       </section>
 
-      <section className={`rounded-lg border border-slate-700/80 bg-slate-surface ${mobileLayout ? 'p-3' : 'p-4'}`}>
-        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h2 className="text-sm font-extrabold uppercase tracking-wider text-white">거래 내역</h2>
-            <p className="mt-1 text-xs text-slate-500">필터 조건에 맞는 거래 {filteredTrades.length.toLocaleString()}건</p>
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="rounded-lg border border-slate-800 bg-[#0f172a] px-4 py-12 text-center text-sm text-slate-500">
-            거래내역을 불러오는 중입니다.
-          </div>
-        ) : null}
-
-        {!loading && tradeError ? (
-          <div className="rounded-lg border border-rose-400/30 bg-rose-950/20 px-4 py-12 text-center text-sm text-rose-300">
-            {tradeError}
-          </div>
-        ) : null}
-
-        {!loading && !tradeError && filteredTrades.length === 0 ? (
-          <div className="rounded-lg border border-slate-800 bg-[#0f172a] px-4 py-12 text-center text-sm text-slate-500">
-            선택한 조건에 맞는 거래 내역이 없습니다.
-          </div>
-        ) : null}
-
-        {!loading && !tradeError && filteredTrades.length > 0 ? (
-          <div className={`grid ${mobileLayout ? 'gap-2.5' : 'gap-3 lg:grid-cols-2'}`}>
-            {filteredTrades.map((trade) => (
-              <article
+      <section className="bg-slate-surface border border-slate-700/80 rounded-lg overflow-hidden">
+        {mobileLayout ? (
+          <div className="flex flex-col">
+            {!loading && !tradeError && filteredTrades.map((trade) => (
+              <button
                 key={trade.id}
-                className="cursor-pointer rounded-lg border border-slate-800 bg-[#0f172a] p-4 transition hover:border-slate-600 hover:bg-white/[0.04]"
+                className="w-full border-b border-slate-700/70 px-3 py-3 text-left transition last:border-b-0 hover:bg-white/[0.04]"
+                type="button"
                 onClick={() => setSelectedTrade(trade)}
               >
-                <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
                     <AssetLogo symbol={trade.ticker} assetType={trade.assetType} name={trade.symbolName} size="h-9 w-9" />
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-extrabold leading-tight text-white">{trade.symbolName}</p>
-                      <p className="mt-1 truncate font-mono text-xs text-slate-500">{trade.ticker}</p>
+                      <p className="truncate font-bold leading-tight text-white">{trade.symbolName}</p>
+                      <p className="mt-0.5 truncate text-xs font-mono text-slate-500">{trade.ticker}</p>
                     </div>
                   </div>
-                  <span className={`shrink-0 rounded border px-2 py-1 text-xs font-black ${exchangeTone[trade.exchange] || 'border-slate-600 bg-slate-700 text-slate-200'}`}>
-                    {trade.exchange}
-                  </span>
-                </div>
-
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <span className={`font-bold ${trade.side === '매수' || trade.side === '입금' ? 'text-emerald-300' : 'text-rose-300'}`}>
-                    {trade.side} {trade.side === '매수' ? '(Buy)' : trade.side === '매도' ? '(Sell)' : ''}
-                  </span>
-                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${trade.status === '체결완료'
-                    ? 'bg-slate-600/60 text-slate-200'
-                    : 'border border-slate-600 bg-slate-700/30 text-slate-200'
-                  }`}>
-                    {trade.status}{trade.status === '미체결' ? ' (Pending)' : ''}
-                  </span>
-                  <span className="font-mono text-xs text-slate-500">{trade.date.replaceAll('-', '.')} {trade.time}</span>
-                </div>
-
-                <dl className={`mt-4 grid gap-2 text-xs ${mobileLayout ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4'}`}>
-                  {[
-                    ['체결가', trade.price],
-                    ['수량', trade.quantity],
-                    ['정산금액', trade.amount],
-                    ['수수료', trade.fees],
-                  ].map(([label, value]) => (
-                    <div key={label} className="rounded border border-slate-800 bg-black/20 px-3 py-2">
-                      <dt className="font-bold text-slate-500">{label}</dt>
-                      <dd className="mt-1 truncate font-mono font-bold text-slate-100">{value}</dd>
-                    </div>
-                  ))}
-                </dl>
-
-                {trade.isActionable && trade.sourceType === 'APP' ? (
-                  <div className={`mt-3 grid gap-2 ${mobileLayout ? 'grid-cols-2' : 'grid-cols-[auto_auto] justify-end'}`}>
-                    <button
-                      className="rounded border border-ai-cyan/40 px-3 py-1.5 text-xs font-bold text-ai-cyan transition hover:bg-ai-cyan/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      type="button"
-                      disabled={Boolean(actionLoadingId)}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        handleOpenModify(trade)
-                      }}
-                    >
-                      {getPrimaryActionLabel(trade)}
-                    </button>
-                    <button
-                      className="rounded border border-rose-400/40 px-3 py-1.5 text-xs font-bold text-rose-300 transition hover:bg-rose-400/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      type="button"
-                      disabled={Boolean(actionLoadingId)}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        handleOpenCancel(trade)
-                      }}
-                    >
-                      {actionLoadingId === `cancel-${trade.id}` ? '취소 중' : '주문 취소'}
-                    </button>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <span className={`rounded border px-2 py-1 text-[11px] font-black ${exchangeTone[trade.exchange] || 'border-slate-600 bg-slate-700 text-slate-200'}`}>
+                      {exchangeLabels[trade.exchange] || trade.exchange}
+                    </span>
+                    <span className="rounded-full border border-slate-600 bg-slate-700/30 px-2.5 py-1 text-[11px] font-bold text-slate-200">
+                      {trade.status}
+                    </span>
                   </div>
-                ) : null}
-              </article>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <div className="rounded-md bg-[#0f172a] px-2.5 py-2">
+                    <p className="text-[11px] font-bold text-slate-500">체결가</p>
+                    <p className="mt-1 font-mono text-xs font-bold text-slate-100">{trade.price}</p>
+                  </div>
+                  <div className="rounded-md bg-[#0f172a] px-2.5 py-2">
+                    <p className="text-[11px] font-bold text-slate-500">수량</p>
+                    <p className="mt-1 font-mono text-xs font-bold text-slate-100">{trade.quantity}</p>
+                  </div>
+                  <div className="rounded-md bg-[#0f172a] px-2.5 py-2">
+                    <p className="text-[11px] font-bold text-slate-500">정산금액</p>
+                    <p className="mt-1 font-mono text-xs font-bold text-slate-100">{trade.amount}</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className={`text-xs font-bold ${trade.side === '留ㅼ닔' || trade.side === '?낃툑'
+                      ? 'text-emerald-300'
+                      : 'text-rose-300'
+                    }`}>
+                      {trade.side} {trade.side === '留ㅼ닔'
+                        ? '(Buy)'
+                        : trade.side === '留ㅻ룄'
+                          ? '(Sell)'
+                          : ''}
+                    </p>
+                    <p className="mt-1 text-[11px] font-mono text-slate-500">{trade.date.replaceAll('-', '.')} {trade.time}</p>
+                  </div>
+                  {trade.isActionable && trade.sourceType === 'APP' ? (
+                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                      <button
+                        className="rounded border border-ai-cyan/40 px-2.5 py-1.5 text-[11px] font-bold text-ai-cyan transition hover:bg-ai-cyan/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        type="button"
+                        disabled={Boolean(actionLoadingId)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          handleOpenModify(trade)
+                        }}
+                      >
+                        {getPrimaryActionLabel(trade)}
+                      </button>
+                      <button
+                        className="rounded border border-rose-400/40 px-2.5 py-1.5 text-[11px] font-bold text-rose-300 transition hover:bg-rose-400/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        type="button"
+                        disabled={Boolean(actionLoadingId)}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          handleOpenCancel(trade)
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </button>
             ))}
+            {loading ? (
+              <div className="px-4 py-12 text-center text-sm text-slate-500">
+                거래내역을 불러오는 중입니다.
+              </div>
+            ) : null}
+            {!loading && tradeError ? (
+              <div className="px-4 py-12 text-center text-sm text-rose-300">
+                {tradeError}
+              </div>
+            ) : null}
+            {!loading && !tradeError && filteredTrades.length === 0 ? (
+              <div className="px-4 py-12 text-center text-sm text-slate-500">
+                선택한 조건에 맞는 거래 내역이 없습니다.
+              </div>
+            ) : null}
           </div>
-        ) : null}
+        ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1040px] border-collapse text-sm">
+            <thead className="border-b border-slate-700 bg-slate-800/70 text-xs text-slate-300">
+              <tr>
+                {['일시 (Date)', '거래소 (Exchange)', '종목명 (Asset/Ticker)', '구분 (Side)', '체결가 (Price)', '수량 (Qty)', '정산금액 (Total)', '상태 (Status)'].map((head) => (
+                  <th key={head} className="px-4 py-3 text-left font-bold">{head}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {!loading && !tradeError && filteredTrades.map((trade) => (
+                <tr
+                  key={trade.id}
+                  className="cursor-pointer border-b border-slate-700/70 last:border-b-0 hover:bg-white/[0.04]"
+                  onClick={() => setSelectedTrade(trade)}
+                >
+                  <td className="px-4 py-4 font-mono text-xs text-slate-300">{trade.date.replaceAll('-', '.')} {trade.time}</td>
+                  <td className="px-4 py-4">
+                    <span className={`rounded border px-2 py-1 text-xs font-black ${exchangeTone[trade.exchange] || 'border-slate-600 bg-slate-700 text-slate-200'}`}>
+                      {trade.exchange}
+                    </span>
+                  </td>
+                  <td className="px-4 py-4">
+                    <div className="flex items-center gap-3">
+                      <AssetLogo symbol={trade.ticker} assetType={trade.assetType} name={trade.symbolName} size="h-8 w-8" />
+                      <div>
+                        <p className="font-bold text-white leading-tight">{trade.symbolName}</p>
+                        <p className="mt-0.5 text-xs text-slate-500 font-mono">{trade.ticker}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-4">
+                    <span className={`font-bold ${trade.side === '매수' || trade.side === '입금'
+                      ? 'text-emerald-300'
+                      : 'text-rose-300'
+                    }`}>
+                      {trade.side} {trade.side === '매수'
+                        ? '(Buy)'
+                        : trade.side === '매도'
+                          ? '(Sell)'
+                          : ''}
+                    </span>
+                  </td>
+                  <td className="px-4 py-4 font-mono font-bold text-slate-100">{trade.price}</td>
+                  <td className="px-4 py-4 font-mono font-bold text-slate-100">{trade.quantity}</td>
+                  <td className="px-4 py-4 font-mono font-bold text-slate-100">{trade.amount}</td>
+                  <td className="px-4 py-4">
+                    <div className="flex flex-col items-start gap-2">
+                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${trade.status === '체결완료'
+                        ? 'bg-slate-600/60 text-slate-200'
+                        : 'border border-slate-600 bg-slate-700/30 text-slate-200'
+                      }`}>
+                        {trade.status}{trade.status === '미체결' ? ' (Pending)' : ''}
+                      </span>
+                      {trade.isActionable && trade.sourceType === 'APP' ? (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            className="rounded border border-ai-cyan/40 px-2.5 py-1 text-xs font-bold text-ai-cyan transition hover:bg-ai-cyan/10 disabled:cursor-not-allowed disabled:opacity-50"
+                            type="button"
+                            disabled={Boolean(actionLoadingId)}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleOpenModify(trade)
+                            }}
+                          >
+                            {getPrimaryActionLabel(trade)}
+                          </button>
+                          <button
+                            className="rounded border border-rose-400/40 px-2.5 py-1 text-xs font-bold text-rose-300 transition hover:bg-rose-400/10 disabled:cursor-not-allowed disabled:opacity-50"
+                            type="button"
+                            disabled={Boolean(actionLoadingId)}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleOpenCancel(trade)
+                            }}
+                          >
+                            {actionLoadingId === `cancel-${trade.id}` ? '취소 중' : '주문 취소'}
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {loading && (
+                <tr>
+                  <td className="px-4 py-12 text-center text-sm text-slate-500" colSpan={8}>
+                    거래내역을 불러오는 중입니다.
+                  </td>
+                </tr>
+              )}
+              {!loading && tradeError && (
+                <tr>
+                  <td className="px-4 py-12 text-center text-sm text-rose-300" colSpan={8}>
+                    {tradeError}
+                  </td>
+                </tr>
+              )}
+              {!loading && !tradeError && filteredTrades.length === 0 && (
+                <tr>
+                  <td className="px-4 py-12 text-center text-sm text-slate-500" colSpan={8}>
+                    선택한 조건에 맞는 거래 내역이 없습니다.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        )}
       </section>
 
       {selectedTrade && (

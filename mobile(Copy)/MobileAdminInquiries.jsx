@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import Header from '../components/Header.jsx'
-import { supabase } from '../supabaseClient.js'
+import Header from '../../components/Header.jsx'
+import { supabase } from '../../supabaseClient.js'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5050'
 

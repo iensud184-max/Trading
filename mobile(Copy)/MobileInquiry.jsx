@@ -1,8 +1,9 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import Header from '../components/Header.jsx'
-import { INQUIRY_ROUTES } from '../dashboardConstants.js'
-import { supabase } from '../supabaseClient.js'
+import Header from '../../components/Header.jsx'
+import { SidebarNav } from '../../components/DashboardComponents.jsx'
+import { DASHBOARD_QUERY_TABS, DASHBOARD_ROUTE, INQUIRY_ROUTES } from '../../dashboardConstants.js'
+import { supabase } from '../../supabaseClient.js'
 
 const inquiryTypes = [
   { value: '', label: '문의 유형을 선택해주세요' },
@@ -107,7 +108,9 @@ const INQUIRY_FILE_BUCKET = 'inquiry-files'
 const MAX_INQUIRY_FILE_SIZE = 5 * 1024 * 1024
 const ALLOWED_INQUIRY_FILE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'pdf', 'txt', 'doc', 'docx', 'xls', 'xlsx'])
 const HISTORY_PAGE_SIZE = 10
+const INITIAL_FAQ_VISIBLE_COUNT = 3
 
+const dashboardQueryTabs = new Set(DASHBOARD_QUERY_TABS)
 const inquiryTypeLabels = Object.fromEntries(inquiryTypes.filter((item) => item.value).map((item) => [item.value, item.label]))
 
 const getInquiryFileExtension = (fileName = '') => {
@@ -408,6 +411,7 @@ function InquiryTable({
 }
 
 export default function Inquiry({ isLoggedIn, userEmail, handleLogout, hideHeader = false, mobileLayout = false }) {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(!mobileLayout)
   const [formState, setFormState] = useState(initialFormState)
   const [selectedFile, setSelectedFile] = useState(null)
   const [fileInputKey, setFileInputKey] = useState(0)
@@ -417,6 +421,7 @@ export default function Inquiry({ isLoggedIn, userEmail, handleLogout, hideHeade
   const [inquirySortOrder, setInquirySortOrder] = useState('desc')
   const [historyPage, setHistoryPage] = useState(1)
   const [expandedFaqIndex, setExpandedFaqIndex] = useState(null)
+  const [showAllFaqItems, setShowAllFaqItems] = useState(false)
   const [inquiriesLoading, setInquiriesLoading] = useState(false)
   const [submitLoading, setSubmitLoading] = useState(false)
   const [deletingInquiryIds, setDeletingInquiryIds] = useState(() => new Set())
@@ -426,7 +431,6 @@ export default function Inquiry({ isLoggedIn, userEmail, handleLogout, hideHeade
   const { pathname } = useLocation()
   const isWriteView = pathname === INQUIRY_ROUTES.write
   const isHistoryView = pathname === INQUIRY_ROUTES.history
-  const shouldHideHeader = mobileLayout && hideHeader
 
   const loadInquiries = useCallback(async () => {
     if (!isLoggedIn) {
@@ -589,6 +593,14 @@ export default function Inquiry({ isLoggedIn, userEmail, handleLogout, hideHeade
         return next
       })
     }
+  }
+
+  const handleDashboardTabChange = (tabKey) => {
+    if (dashboardQueryTabs.has(tabKey)) {
+      navigate(`${DASHBOARD_ROUTE}?tab=${tabKey}`)
+      return
+    }
+    navigate(DASHBOARD_ROUTE)
   }
 
   const handleSubmit = async (event) => {
@@ -776,11 +788,15 @@ export default function Inquiry({ isLoggedIn, userEmail, handleLogout, hideHeade
     </Widget>
   )
 
-  const renderChecklistPanel = () => (
+  const renderChecklistPanel = () => {
+    const visibleFaqItems = showAllFaqItems ? faqItems : faqItems.slice(0, INITIAL_FAQ_VISIBLE_COUNT)
+    const hasHiddenFaqItems = faqItems.length > INITIAL_FAQ_VISIBLE_COUNT
+
+    return (
     <Widget className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
       <WidgetTitle title={inquiryHomeSections.checklist.title} icon={inquiryHomeSections.checklist.icon} />
       <div className="min-h-0 space-y-2 overflow-y-auto pr-1">
-        {faqItems.map((item, index) => {
+        {visibleFaqItems.map((item, index) => {
           const isExpanded = expandedFaqIndex === index
 
           return (
@@ -808,8 +824,21 @@ export default function Inquiry({ isLoggedIn, userEmail, handleLogout, hideHeade
           )
         })}
       </div>
+      {hasHiddenFaqItems ? (
+        <button
+          type="button"
+          className="mt-3 rounded-lg border border-slate-700 bg-[#0f172a] px-4 py-2 text-sm font-bold text-slate-300 transition hover:border-ai-cyan hover:text-white"
+          onClick={() => {
+            setShowAllFaqItems((current) => !current)
+            setExpandedFaqIndex(null)
+          }}
+        >
+          {showAllFaqItems ? '접기' : `더보기 (${faqItems.length - INITIAL_FAQ_VISIBLE_COUNT}개)`}
+        </button>
+      ) : null}
     </Widget>
-  )
+    )
+  }
 
   const renderInquiryList = (rows, emptyMessage, emptyIcon = 'inbox', options = {}) => (
     <>
@@ -1025,12 +1054,25 @@ export default function Inquiry({ isLoggedIn, userEmail, handleLogout, hideHeade
   )
 
   return (
-    <div className="min-h-screen bg-obsidian-bg font-inter text-[#e2e2ec]">
-      <div className={`min-h-screen ${mobileLayout ? 'px-3 py-4' : 'px-6 py-8'}`}>
-        {!shouldHideHeader ? (
-          <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} />
+    <div className={`${mobileLayout ? '' : 'min-h-screen'} bg-obsidian-bg font-inter text-[#e2e2ec]`}>
+      <div className={`${mobileLayout ? 'grid gap-4' : 'flex min-h-screen flex-col lg:flex-row'}`}>
+        {!mobileLayout ? (
+          <SidebarNav
+            activeTab="inquiry"
+            isOpen={isSidebarOpen}
+            isLoggedIn={isLoggedIn}
+            onClose={() => setIsSidebarOpen(false)}
+            onOpen={() => setIsSidebarOpen(true)}
+            onTabChange={handleDashboardTabChange}
+          />
         ) : null}
-        {isWriteView ? renderHome() : isHistoryView ? renderHistory() : renderFaq()}
+
+        <div className={mobileLayout ? 'min-w-0 flex-1' : `min-w-0 flex-1 px-6 py-8 ${!isSidebarOpen ? 'pt-20 lg:pt-8' : ''}`}>
+          {!hideHeader ? (
+            <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} />
+          ) : null}
+          {isWriteView ? renderHome() : isHistoryView ? renderHistory() : renderFaq()}
+        </div>
       </div>
     </div>
   )

@@ -1,20 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { deleteUserWatchlistItem, fetchUserWatchlist, supabase } from '../supabaseClient'
-import Header from '../components/Header.jsx'
-import Settings from './Settings'
-import AssetLogo from '../components/AssetLogo.jsx'
-import { Rate, SectionHeader, SidebarNav } from '../components/DashboardComponents.jsx'
-import WatchlistTab from './WatchlistTab.jsx'
-import AssetsTab from './AssetsTab.jsx'
-import TradeHistoryTab from './TradeHistoryTab.jsx'
-import AdminMlData from './AdminMlData.jsx'
-import { getApiErrorMessage } from '../lib/apiError.js'
+import { deleteUserWatchlistItem, fetchUserWatchlist, supabase } from '../../supabaseClient'
+import Header from '../../components/Header.jsx'
+import MobileSettings from './MobileSettings.jsx'
+import AssetLogo from '../../components/AssetLogo.jsx'
+import { Rate, SectionHeader, SidebarNav } from '../../components/DashboardComponents.jsx'
+import MobileWatchlistTab from './MobileWatchlistTab.jsx'
+import MobileAssetsTab from './MobileAssetsTab.jsx'
+import MobileTradeHistoryTab from './MobileTradeHistoryTab.jsx'
+import MobileAdminMlData from './MobileAdminMlData.jsx'
+import { getApiErrorMessage } from '../../lib/apiError.js'
 import {
   deductCoinoneTransfersFromEstimatedHoldings,
   mergeCompletedTransfersIntoCash,
-} from '../lib/transferBalanceAdjustments.js'
-import { DASHBOARD_TAB_KEYS, DEFAULT_DASHBOARD_TAB } from '../dashboardConstants.js'
+} from '../../lib/transferBalanceAdjustments.js'
+import { DASHBOARD_TAB_KEYS, DEFAULT_DASHBOARD_TAB } from '../../dashboardConstants.js'
 
 const DASHBOARD_API_BASE_URL = 'http://localhost:5050'
 const BALANCE_EXCHANGE_ORDER = ['TOSS', 'KIS', 'COINONE', 'BINANCE', 'BINANCE_UM_FUTURES']
@@ -379,15 +379,15 @@ const getHoldingMarketType = (holding = {}) => {
   const currency = String(holding.currency || '').toUpperCase()
   const combined = `${symbol} ${exchange} ${accountType} ${assetType} ${market} ${currency}`
 
-  if (/CRYPTO|COIN|COINONE|BINANCE|BTC|ETH|XRP|SOL|USDT/.test(combined) || combined.includes('코인')) {
+  if (/CRYPTO|COIN|COINONE|BINANCE|BTC|ETH|XRP|SOL|USDT|코인/.test(combined)) {
     return 'coin'
   }
 
-  if (/OVERSEAS|FOREIGN|GLOBAL|NASDAQ|NYSE|AMEX|US|USD/.test(combined) || combined.includes('해외')) {
+  if (/OVERSEAS|FOREIGN|GLOBAL|NASDAQ|NYSE|AMEX|US|USD|해외/.test(combined)) {
     return 'overseas'
   }
 
-  if (/DOMESTIC|KR|KRW|KOSPI|KOSDAQ/.test(combined) || combined.includes('국내') || /^[0-9a-zA-Z]{6,7}$/.test(symbol)) {
+  if (/DOMESTIC|KR|KRW|KOSPI|KOSDAQ|국내/.test(combined) || /^[0-9a-zA-Z]{6,7}$/.test(symbol)) {
     return 'domestic'
   }
 
@@ -627,12 +627,12 @@ const getHoldingIdentity = (holding = {}) => {
 
 const normalizeExchangeText = (exchangeText = '') => {
   const normalized = String(exchangeText || '').toUpperCase()
-  if (normalized.includes('KIS')) return 'KIS'
-  if (normalized.includes('TOSS')) return 'TOSS'
-  if (normalized.includes('COINONE')) return 'COINONE'
-  if (normalized.includes('BINANCE_UM_FUTURES')) return 'BINANCE_UM_FUTURES'
-  if (normalized.includes('BINANCE')) return 'BINANCE'
-  return normalized
+  return normalized.includes('KIS') ? 'KIS'
+    : normalized.includes('TOSS') ? 'TOSS'
+      : normalized.includes('COINONE') ? 'COINONE'
+        : normalized.includes('BINANCE_UM_FUTURES') ? 'BINANCE_UM_FUTURES'
+          : normalized.includes('BINANCE') ? 'BINANCE'
+            : normalized
 }
 
 const getHoldingAccountScope = (holding = {}) => {
@@ -825,7 +825,16 @@ const buildBalanceRequests = (keyStatus) =>
     })
   })
 
-export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userProfile, setUserProfile, hideHeader = false, hideSidebar = false, mobileLayout = false }) {
+export default function MobileDashboardPage({
+  isLoggedIn,
+  userEmail,
+  handleLogout,
+  userProfile,
+  setUserProfile,
+  hideHeader = true,
+  hideSidebar = true,
+  mobileLayout = true,
+}) {
   const [searchParams, setSearchParams] = useSearchParams()
   const [inputs, setInputs] = useState({
     appkey: '',
@@ -1354,7 +1363,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
     <div className="min-h-screen overflow-x-hidden bg-obsidian-bg text-[#e2e2ec] font-inter">
       <div className={hideSidebar ? 'min-h-screen' : 'flex min-h-screen flex-col lg:flex-row'}>
         {!hideSidebar ? (
-        <SidebarNav
+          <SidebarNav
           activeTab={activeTab}
           isOpen={isSidebarOpen}
           isLoggedIn={isLoggedIn}
@@ -1364,18 +1373,20 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
           />
         ) : null}
 
-        <div className={`min-w-0 flex-1 ${mobileLayout ? 'px-0 py-0' : 'px-6 py-8'} ${!hideSidebar && !isSidebarOpen ? 'pt-20 lg:pt-8' : ''}`}> 
+        <div className={`min-w-0 flex-1 ${mobileLayout ? 'px-0 py-0' : 'px-6 py-8'} ${!hideSidebar && !isSidebarOpen ? 'pt-20 lg:pt-8' : ''}`}>
           {/* 공통 통합 헤더 네비게이션 */}
-          {!hideHeader ? <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} userProfile={userProfile} /> : null}
+          {!hideHeader ? (
+            <Header isLoggedIn={isLoggedIn} userEmail={userEmail} handleLogout={handleLogout} userProfile={userProfile} />
+          ) : null}
 
           {/* 메인 레이아웃 2단 그리드 */}
           {activeTab === 'dashboard' && (
             <main className="max-w-7xl mx-auto flex flex-col gap-6">
 
-              {/* 계정 필터 및 환율 상태 영역 */}
-              <div className="grid gap-3 rounded-lg border border-slate-800/60 bg-slate-surface/40 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+              {/* 계정 필터 및 통화 단위 토글 스위치 영역 */}
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-1 bg-slate-surface/40 border border-slate-800/60 p-3 rounded-lg">
                 {/* 실시간 적용 환율 상태 모니터링 뱃지 */}
-                <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-slate-400 font-sans">
+                <div className="flex items-center gap-2 text-xs text-slate-400 font-sans">
                   <span className={`w-1.5 h-1.5 rounded-full ${(!balance?.exchange_rate || balance.exchange_rate === 1500) ? 'bg-amber-400' : 'bg-[#38bdf8] animate-pulse'}`} />
                   <span className="font-bold">적용 환율:</span>
                   <span className="font-mono font-bold text-white">
@@ -1383,7 +1394,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                   </span>
                   {(!balance?.exchange_rate || balance.exchange_rate === 1500) ? (
                     <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[10px] font-bold text-amber-400">
-                      임시 고정 환율 적용 중
+                      임시 고정 환율 적용됨
                     </span>
                   ) : (
                     <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-400">
@@ -1392,7 +1403,8 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                   )}
                 </div>
 
-                <div className="flex flex-wrap items-center justify-end gap-3">
+                <div className="flex items-center gap-3 self-end sm:self-auto">
+                  {/* 모의계좌 포함 / 실거래 전용 필터 */}
                   <div className="inline-flex rounded-md bg-[#0f172a] p-1 border border-slate-700/80">
                     <button
                       onClick={() => setShowMockAssets(true)}
@@ -1443,24 +1455,24 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
               </div>
 
               {/* 자산 요약 카드 */}
-              <div className={mobileLayout ? 'grid gap-2.5' : 'grid grid-cols-1 gap-4 md:grid-cols-3'}>
+              <div className="grid grid-cols-1 gap-2.5">
                 {currencySummaryCards.map((card) => (
-                  <div key={card.currency} className={`min-w-0 rounded-lg border border-slate-700/80 bg-slate-surface ${mobileLayout ? 'p-3.5' : 'p-5'}`}>
-                    <div className={`${mobileLayout ? 'grid grid-cols-[minmax(0,1fr)_auto] items-start' : 'flex items-start'} justify-between gap-3`}>
-                      <span className={`${mobileLayout ? 'min-w-0 whitespace-normal break-keep leading-5' : ''} text-xs font-bold text-slate-400`}>{card.label}</span>
+                  <div key={card.currency} className="bg-slate-surface border border-slate-700/80 rounded-lg p-3.5">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                      <span className="min-w-0 break-keep text-xs font-bold leading-5 text-slate-400">{card.label}</span>
                       <button
                         type="button"
                         onClick={() => setSelectedSummaryCurrency(card.currency)}
-                        className={`${mobileLayout ? 'h-8 shrink-0 rounded-md px-3' : 'px-2 py-1'} rounded border border-slate-700 bg-[#0f172a] text-[10px] font-bold text-slate-300 transition hover:border-cyan-500/40 hover:text-white`}
+                        className="inline-flex h-8 shrink-0 items-center rounded-full border border-slate-700 px-3 text-[10px] font-bold text-slate-300 transition hover:border-cyan-500/40 hover:text-white"
                       >
                         상세 정보
                       </button>
                     </div>
-                    <div className={mobileLayout ? 'mt-3 grid min-w-0 gap-1' : 'mt-1 flex flex-wrap items-baseline gap-2'}>
-                      <span className={`${mobileLayout ? 'block min-w-0 break-words text-base leading-snug' : 'text-lg'} font-mono font-bold text-white`}>
-                        {balanceLoading ? '조회 중...' : formatSummaryCurrency(card.value, card.currency)}
+                    <div className="mt-3 grid min-w-0 gap-1">
+                      <span className="block min-w-0 break-words font-mono text-base font-bold leading-snug text-white">
+                      {balanceLoading ? '조회 중' : formatSummaryCurrency(card.value, card.currency)}
                       </span>
-                      <span className={`${mobileLayout ? 'mt-1 block' : ''} text-xs font-bold font-mono ${card.profitRate >= 0 ? 'text-red-400' : 'text-blue-400'}`}>
+                      <span className={`text-xs font-bold font-mono ${card.profitRate >= 0 ? 'text-red-400' : 'text-blue-400'}`}>
                         ({formatSignedRate(card.profitRate)})
                       </span>
                     </div>
@@ -1472,13 +1484,13 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                 <div className="bg-slate-surface border border-slate-700/80 rounded-lg p-5">
                   <span className="text-xs font-bold text-slate-400">총 평가 자산 ({balance?.currency || 'KRW'})</span>
                   <div className="text-xl font-bold font-mono text-white mt-1">
-                    {balanceLoading ? '조회 중...' : formatCurrency(balance?.total_evaluation, balance?.currency, 'KRW', balance?.exchange_rate)}
+                    {balanceLoading ? '조회 중' : formatCurrency(balance?.total_evaluation, balance?.currency, 'KRW', balance?.exchange_rate)}
                   </div>
                 </div>
 
                 <div className="bg-slate-surface border border-slate-700/80 rounded-lg p-5">
                   <div className="flex items-start justify-between gap-3">
-                    <span className="text-xs font-bold text-slate-400">가용 예수금(KRW)</span>
+                    <span className="text-xs font-bold text-slate-400">가용 예수금 (KRW)</span>
                     <button
                       type="button"
                       onClick={() => setIsCashDetailModalOpen(true)}
@@ -1488,11 +1500,11 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                     </button>
                   </div>
                   <div className="text-xl font-bold font-mono text-white mt-1">
-                    {balanceLoading ? '조회 중...' : formatNullableCurrency(balance?.available_cash, balance?.currency, 'KRW', balance?.exchange_rate)}
+                    {balanceLoading ? '조회 중' : formatNullableCurrency(balance?.available_cash, balance?.currency, 'KRW', balance?.exchange_rate)}
                   </div>
                   {balance?.cash_unavailable_sources?.length > 0 ? (
                     <p className="mt-2 text-[11px] leading-5 text-amber-300/90">
-                      일부 계좌 예수금은 아직 합산되지 않았습니다. {balance.cash_unavailable_sources.join(', ')}
+                      일부 계좌 예수금은 아직 합산되지 않았습니다: {balance.cash_unavailable_sources.join(', ')}
                     </p>
                   ) : null}
                 </div>
@@ -1512,22 +1524,22 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
               ) : null}
 
               {/* 자산 배분 상태 및 관심 종목 그리드 */}
-              <div className={mobileLayout ? 'grid grid-cols-1 gap-4' : 'grid grid-cols-1 md:grid-cols-12 gap-6'}>
+              <div className="grid grid-cols-1 gap-4">
 
                 {/* 자산 배분 상태 (Allocation) */}
-                <div className={`bg-slate-surface border border-slate-700/80 rounded-lg p-5 flex flex-col gap-4 ${mobileLayout ? '' : 'md:col-span-5'}`}>
+                <div className="bg-slate-surface border border-slate-700/80 rounded-lg p-4 flex flex-col gap-4">
                   <SectionHeader title="자산 배분 상태" />
                   <div className="flex h-3.5 overflow-hidden rounded-full bg-[#0c0e15] border border-slate-800">
                     {allocation.map((item) => (
                       <span key={item.id} className={`${item.color} h-full transition-all`} style={{ width: `${item.value}%` }} />
                     ))}
                   </div>
-                  <div className={mobileLayout ? 'grid grid-cols-2 gap-2' : 'flex flex-col gap-2'}>
+                  <div className="flex flex-col gap-2">
                     {allocation.map((item) => (
-                      <div key={item.id} className="flex min-w-0 items-center justify-between gap-2 rounded bg-[#0c0e15]/40 px-3 py-2 border border-slate-800/40 text-xs">
-                        <span className="flex min-w-0 items-center gap-2 font-bold text-slate-200">
-                          <span className={`w-2 h-2 rounded-full ${item.color}`} />
-                          <span className={mobileLayout ? 'min-w-0 truncate' : ''}>{item.label}</span>
+                      <div key={item.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded bg-[#0c0e15]/40 px-3 py-2 border border-slate-800/40 text-xs">
+                        <span className="flex min-w-0 items-center gap-2 font-bold">
+                          <span className={`w-2 h-2 shrink-0 rounded-full ${item.color}`} />
+                          <span className="min-w-0 break-keep leading-5">{item.label}</span>
                         </span>
                         <span className="shrink-0 font-mono font-bold text-slate-300">{formatAllocationPercent(item)}</span>
                       </div>
@@ -1535,100 +1547,106 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                   </div>
                 </div>
 
-                {!mobileLayout ? (
-                  <div className="bg-slate-surface border border-slate-700/80 rounded-lg p-5 md:col-span-7 flex flex-col gap-3">
-                    <div className="mb-1 flex items-start justify-between gap-3">
-                      <h2 className="text-sm font-bold text-white uppercase tracking-wider">관심 종목 명단 (시세 모니터링)</h2>
-                      <div className="flex shrink-0 gap-2">
-                        <button
-                          className="inline-flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[10px] font-bold text-slate-400 transition-all hover:border-ai-cyan hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                          type="button"
-                          disabled={watchlistLoading || watchlistRefreshCooldown > 0}
-                          onClick={() => loadDashboardWatchlist({ manual: true })}
-                        >
-                          <RefreshIcon className={`h-3 w-3 ${watchlistLoading ? 'animate-spin' : ''}`} />
-                          {watchlistLoading
-                            ? '갱신 중...'
-                            : watchlistRefreshCooldown > 0
-                              ? `${watchlistRefreshCooldown}초`
-                              : '새로 고침'}
-                        </button>
-                        <button
-                          className="rounded border border-slate-700 px-2 py-1 text-[10px] font-bold text-slate-400 transition-all hover:border-ai-cyan hover:text-white"
-                          type="button"
-                          onClick={() => handleDashboardTabChange('watchlist')}
-                        >
-                          관리
-                        </button>
-                      </div>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[820px] table-fixed border-collapse text-xs">
-                        <thead className="block border-b border-slate-800 bg-[#0c0e15]/100 text-slate-400 [&>tr]:table [&>tr]:w-full [&>tr]:table-fixed">
-                          <tr>
-                            <th className="px-3 py-2 text-left font-bold w-[32%]">종목명</th>
-                            <th className="px-3 py-2 text-left font-bold w-[13%]">시장</th>
-                            <th className="px-3 py-2 text-right font-bold w-[18%]">저장 가격</th>
-                            <th className="px-3 py-2 text-right font-bold w-[18%]">현재가</th>
-                            <th className="px-3 py-2 text-right font-bold w-[19%]">현재가 변동</th>
-                          </tr>
-                        </thead>
-                        <tbody className="block max-h-[136px] overflow-y-auto divide-y divide-slate-800/40 [&>tr]:table [&>tr]:w-full [&>tr]:table-fixed">
-                          {dashboardWatchlist.map((item) => {
-                            const stockCurrency = item.currency || (item.marketCountry === 'US' ? 'USD' : 'KRW')
-                            const savedPrice = parsePriceNumber(item.latestPrice ?? item.average)
-                            const currentPrice = getWatchlistCurrentPrice(item) ?? savedPrice
-                            const hasSavedPrice = Number.isFinite(savedPrice) && savedPrice > 0
-                            const hasCurrentPrice = Number.isFinite(currentPrice)
-                            const priceDelta = hasSavedPrice && hasCurrentPrice ? currentPrice - savedPrice : 0
-                            const priceDeltaRate = hasSavedPrice ? (priceDelta / savedPrice) * 100 : 0
-                            const priceDeltaTone = priceDelta > 0 ? 'text-red-400' : priceDelta < 0 ? 'text-blue-400' : 'text-white'
-                            const signedDeltaAmount = `${priceDelta > 0 ? '+' : priceDelta < 0 ? '-' : ''}${formatUnitCurrency(Math.abs(priceDelta), stockCurrency, stockCurrency === 'USD' || stockCurrency === 'USDT' ? displayCurrency : 'KRW', balance?.exchange_rate || 1380)}`
-                            const signedDeltaRate = `${priceDeltaRate > 0 ? '+' : ''}${priceDeltaRate.toFixed(2)}%`
-                            const exchangeRate = balance?.exchange_rate || 1380
-                            const currentDisplayCurrency = stockCurrency === 'USD' || stockCurrency === 'USDT' ? displayCurrency : 'KRW'
-                            const isRemoving = removingWatchlistIds.has(item.id)
-                            return (
-                              <tr key={item.id} className="hover:bg-slate-800/20 transition-colors">
-                                <td className="px-3 py-2.5 font-bold text-white w-[32%]">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <button
-                                      type="button"
-                                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-rose-400 transition-all hover:bg-rose-500/10 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
-                                      aria-label={`${item.name} 관심 종목 해제`}
-                                      title="관심 종목 해제"
-                                      disabled={isRemoving}
-                                      onClick={() => handleRemoveDashboardWatchlistItem(item)}
-                                    >
-                                      <HeartIcon className="h-4 w-4" filled={!isRemoving} />
-                                    </button>
-                                    <AssetLogo symbol={item.symbol} assetType={item.assetType || item.asset_type} name={item.name} size="h-6 w-6" />
-                                    <span className="truncate min-w-0 block">{item.name}</span>
-                                  </div>
-                                </td>
-                                <td className="px-3 py-2.5 text-slate-400 w-[13%] truncate">{item.market}</td>
-                                <td className="w-[18%] truncate px-3 py-2.5 text-right font-mono text-slate-300">
-                                  {hasSavedPrice ? formatUnitCurrency(savedPrice, stockCurrency, currentDisplayCurrency, exchangeRate) : '-'}
-                                </td>
-                                <td className="w-[18%] truncate px-3 py-2.5 text-right font-mono text-slate-300">
-                                  {hasCurrentPrice ? formatUnitCurrency(currentPrice, stockCurrency, currentDisplayCurrency, exchangeRate) : '-'}
-                                </td>
-                                <td className={`w-[19%] truncate px-3 py-2.5 text-right font-mono font-bold ${priceDeltaTone}`}>
-                                  {hasSavedPrice && hasCurrentPrice ? `${signedDeltaAmount} (${signedDeltaRate})` : '-'}
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                      {watchlistError ? <p className="mt-2 whitespace-pre-line text-xs text-red-300">{watchlistError}</p> : null}
+                {/* 관심 종목 명단 */}
+                <div className="bg-slate-surface border border-slate-700/80 rounded-lg p-4 flex flex-col gap-3">
+                  <div className="mb-1 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                    <h2 className="text-sm font-bold text-white uppercase tracking-wider">관심 종목 명단 (시세 모니터링)</h2>
+                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                      <button
+                        className="inline-flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[10px] font-bold text-slate-400 transition-all hover:border-ai-cyan hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        type="button"
+                        disabled={watchlistLoading || watchlistRefreshCooldown > 0}
+                        onClick={() => loadDashboardWatchlist({ manual: true })}
+                      >
+                        <RefreshIcon className={`h-3 w-3 ${watchlistLoading ? 'animate-spin' : ''}`} />
+                        {watchlistLoading
+                          ? '갱신 중'
+                          : watchlistRefreshCooldown > 0
+                            ? `${watchlistRefreshCooldown}초`
+                            : '새로 고침'}
+                      </button>
+                      <button
+                        className="rounded border border-slate-700 px-2 py-1 text-[10px] font-bold text-slate-400 transition-all hover:border-ai-cyan hover:text-white"
+                        type="button"
+                        onClick={() => handleDashboardTabChange('watchlist')}
+                      >
+                        관리
+                      </button>
                     </div>
                   </div>
-                ) : null}
+                  <div className="overflow-x-auto rounded-lg border border-slate-800/70 bg-[#0f172a]">
+                    <table className="min-w-[620px] w-full table-fixed border-collapse text-xs">
+                      <thead className="block border-b border-slate-800 bg-[#0c0e15]/100 text-slate-400 [&>tr]:table [&>tr]:w-full [&>tr]:table-fixed">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-bold w-[32%]">종목명</th>
+                          <th className="px-3 py-2 text-left font-bold w-[13%]">시장</th>
+                          <th className="px-3 py-2 text-right font-bold w-[18%]">저장 당시 가격</th>
+                          <th className="px-3 py-2 text-right font-bold w-[18%]">현재가</th>
+                          <th className="px-3 py-2 text-right font-bold w-[19%]">현재가 변동</th>
+                        </tr>
+                      </thead>
+                      <tbody className="block max-h-[136px] overflow-y-auto divide-y divide-slate-800/40 [&>tr]:table [&>tr]:w-full [&>tr]:table-fixed">
+                        {dashboardWatchlist.map((item) => {
+                          const stockCurrency = item.currency || (item.marketCountry === 'US' ? 'USD' : 'KRW')
+                          const savedPrice = parsePriceNumber(item.latestPrice ?? item.average)
+                          const currentPrice = getWatchlistCurrentPrice(item) ?? savedPrice
+                          const hasSavedPrice = Number.isFinite(savedPrice) && savedPrice > 0
+                          const hasCurrentPrice = Number.isFinite(currentPrice)
+                          const priceDelta = hasSavedPrice && hasCurrentPrice ? currentPrice - savedPrice : 0
+                          const priceDeltaRate = hasSavedPrice ? (priceDelta / savedPrice) * 100 : 0
+                          const priceDeltaTone = priceDelta > 0 ? 'text-red-400' : priceDelta < 0 ? 'text-blue-400' : 'text-white'
+                          const signedDeltaAmount = `${priceDelta > 0 ? '+' : priceDelta < 0 ? '-' : ''}${formatUnitCurrency(Math.abs(priceDelta), stockCurrency, stockCurrency === 'USD' || stockCurrency === 'USDT' ? displayCurrency : 'KRW', balance?.exchange_rate || 1380)}`
+                          const signedDeltaRate = `${priceDeltaRate > 0 ? '+' : ''}${priceDeltaRate.toFixed(2)}%`
+                          const exchangeRate = balance?.exchange_rate || 1380
+                          const currentDisplayCurrency = stockCurrency === 'USD' || stockCurrency === 'USDT' ? displayCurrency : 'KRW'
+                          const isRemoving = removingWatchlistIds.has(item.id)
+                          return (
+                            <tr key={item.id} className="hover:bg-slate-800/20 transition-colors">
+                              <td className="px-3 py-2.5 font-bold text-white w-[32%]">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-rose-400 transition-all hover:bg-rose-500/10 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                    aria-label={`${item.name} 관심 종목 해제`}
+                                    title="관심 종목 해제"
+                                    disabled={isRemoving}
+                                    onClick={() => handleRemoveDashboardWatchlistItem(item)}
+                                  >
+                                    <HeartIcon className="h-4 w-4" filled={!isRemoving} />
+                                  </button>
+                                  <AssetLogo symbol={item.symbol} assetType={item.assetType || item.asset_type} name={item.name} size="h-6 w-6" />
+                                  <span className="truncate min-w-0 block">{item.name}</span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 text-slate-400 w-[13%] truncate">{item.market}</td>
+                              <td className="px-3 py-2.5 text-right font-mono text-slate-300 w-[18%]">
+                                {hasSavedPrice ? formatUnitCurrency(savedPrice, stockCurrency, currentDisplayCurrency, exchangeRate) : '-'}
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-mono text-slate-300 w-[18%]">
+                                {hasCurrentPrice ? formatUnitCurrency(currentPrice, stockCurrency, currentDisplayCurrency, exchangeRate) : '-'}
+                              </td>
+                              <td className={`px-3 py-2.5 text-right font-mono font-bold w-[19%] ${priceDeltaTone}`}>
+                                {hasSavedPrice && hasCurrentPrice ? `${signedDeltaAmount} (${signedDeltaRate})` : '-'}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                        {!watchlistLoading && dashboardWatchlist.length === 0 ? (
+                          <tr>
+                            <td className="px-3 py-8 text-center text-slate-500" colSpan={5}>
+                              관심종목이 없습니다. 하트를 눌러 관심 종목을 추가해주세요.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                    {watchlistError ? <p className="mt-2 whitespace-pre-line text-xs text-red-300">{watchlistError}</p> : null}
+                  </div>
+                </div>
 
               </div>
 
-              {/* 보유 자산 현황 */}
+              {/* 보유 재산 현황 (실제 holdings 연동 테이블) */}
               <div className="bg-slate-surface border border-slate-700/80 rounded-lg p-6 flex flex-col gap-4">
                 <div className="flex justify-between items-center border-b border-slate-800 pb-2">
                   <h2 className="text-sm font-bold text-white flex items-center gap-2 uppercase tracking-wider">
@@ -1643,7 +1661,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                   >
                     <RefreshIcon className={`h-3.5 w-3.5 ${balanceLoading ? 'animate-spin' : ''}`} />
                     {balanceLoading
-                      ? '갱신 중...'
+                      ? '갱신 중'
                       : balanceRefreshCooldown > 0
                         ? `${balanceRefreshCooldown}초`
                         : '새로 고침'}
@@ -1652,90 +1670,78 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
 
                 {balance && balance.holdings.length > 0 ? (
                   mobileLayout ? (
-                  <div className="grid gap-3">
-                    <div className="flex flex-wrap gap-2 border-b border-slate-800 pb-3">
-                      {[
-                        ['qty', '보유수량'],
-                        ['profit', '평가손익'],
-                        ['profit_rate', '수익률'],
-                      ].map(([key, label]) => (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => handleHoldingsSort(key)}
-                          className={`rounded border px-3 py-1.5 text-xs font-bold transition ${
-                            holdingsSort.key === key
-                              ? 'border-ai-cyan bg-ai-cyan/10 text-ai-cyan'
-                              : 'border-slate-700 text-slate-400 hover:border-slate-500 hover:text-white'
-                          }`}
-                        >
-                          {label} {holdingsSort.key === key ? (holdingsSort.direction === 'asc' ? '▲' : '▼') : ''}
-                        </button>
-                      ))}
-                    </div>
                     <div className="grid gap-2.5">
                       {getSortedHoldings(balance.holdings).map((stock, index) => {
-                          const exchangeName = stock.exchange || stock.account_type || '-'
-                          const normalizedExchange = String(exchangeName).toUpperCase()
-                          const isCoinone = normalizedExchange === 'COINONE'
-                          const isBinance = ['BINANCE', 'BINANCE_UM_FUTURES'].includes(normalizedExchange)
-                          const isForeign = /[a-zA-Z]/.test(stock.symbol) && !/^[0-9a-zA-Z]{6,7}$/.test(stock.symbol) && !isCoinone
-                          const stockCurrency = isCoinone ? 'KRW' : (stock.currency || (isBinance || isForeign ? 'USD' : 'KRW'))
-                          const exchangeRate = balance.exchange_rate || 1380
-                          const isDomesticStock = String(stock.asset_type || 'STOCK').toUpperCase() === 'STOCK'
-                            && getHoldingMarketType(stock) === 'domestic'
-                          const currentDisplayCurrency = isCoinone || isDomesticStock ? 'KRW' : 'USD'
-                          const profitRate = Number(stock.profit_rate)
+                        const exchangeName = stock.exchange || stock.account_type || '-'
+                        const normalizedExchange = String(exchangeName).toUpperCase()
+                        const isCoinone = normalizedExchange === 'COINONE'
+                        const isBinance = ['BINANCE', 'BINANCE_UM_FUTURES'].includes(normalizedExchange)
+                        const isForeign = /[a-zA-Z]/.test(stock.symbol) && !/^[0-9a-zA-Z]{6,7}$/.test(stock.symbol) && !isCoinone
+                        const stockCurrency = isCoinone ? 'KRW' : (stock.currency || (isBinance || isForeign ? 'USD' : 'KRW'))
+                        const exchangeRate = balance.exchange_rate || 1380
+                        const isDomesticStock = String(stock.asset_type || 'STOCK').toUpperCase() === 'STOCK'
+                          && getHoldingMarketType(stock) === 'domestic'
+                        const currentDisplayCurrency = isCoinone || isDomesticStock ? 'KRW' : 'USD'
+                        const profitRate = Number(stock.profit_rate)
+                        const profitTone = stock.profit > 0 ? 'text-red-400' : stock.profit < 0 ? 'text-blue-400' : 'text-white'
+                        const profitRateValue = `${profitRate >= 0 ? '+' : ''}${Number.isFinite(profitRate) ? profitRate.toFixed(2) : '0.00'}%`
 
-                          return (
-                            <article
-                              key={`${exchangeName}-${stock.env || 'REAL'}-${stock.symbol}-${index}`}
-                              className="rounded-lg border border-slate-800 bg-[#0f172a] p-4 transition hover:border-slate-600 hover:bg-white/[0.04]"
-                            >
-                              <div className="flex min-w-0 items-start justify-between gap-3">
-                                <div className="flex min-w-0 items-center gap-3">
-                                  <AssetLogo symbol={stock.symbol} assetType={stock.asset_type || (['COINONE', 'BINANCE', 'BINANCE_UM_FUTURES'].includes(normalizedExchange) ? 'CRYPTO' : 'STOCK')} name={stock.name} size="h-9 w-9" />
-                                  <div className="min-w-0">
-                                    <p className="truncate text-sm font-extrabold leading-tight text-white">{stock.name}</p>
-                                    <p className="mt-1 truncate font-mono text-xs text-slate-500">{stock.symbol}</p>
-                                  </div>
+                        return (
+                          <article
+                            key={`${exchangeName}-${stock.env || 'REAL'}-${stock.symbol}-${index}`}
+                            className="rounded-lg border border-slate-800 bg-[#0f172a] p-3.5"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex min-w-0 items-center gap-2.5">
+                                <AssetLogo
+                                  symbol={stock.symbol}
+                                  assetType={stock.asset_type || (['COINONE', 'BINANCE', 'BINANCE_UM_FUTURES'].includes(normalizedExchange) ? 'CRYPTO' : 'STOCK')}
+                                  name={stock.name}
+                                  size="h-8 w-8"
+                                />
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-bold text-white">{stock.name}</div>
+                                  <div className="truncate font-mono text-[10px] text-slate-500">{stock.symbol}</div>
                                 </div>
-                                <span className="shrink-0 rounded border border-slate-600 bg-slate-700 px-2 py-1 text-xs font-black text-slate-200">
-                                  {exchangeName}
-                                </span>
                               </div>
+                              <Rate value={profitRateValue} />
+                            </div>
 
-                              <div className="mt-3 flex flex-wrap items-center gap-2">
-                                <span className={`font-bold ${stock.profit > 0 ? 'text-red-400' : stock.profit < 0 ? 'text-blue-400' : 'text-white'}`}>
-                                  평가손익 {stock.profit > 0 ? '+' : ''}{formatCurrency(stock.profit, stockCurrency, currentDisplayCurrency, exchangeRate)}
-                                </span>
-                                <span className="rounded-full border border-slate-600 bg-slate-700/30 px-3 py-1 text-xs font-bold text-slate-200">
-                                  수익률 {(profitRate >= 0 ? '+' : '') + (Number.isFinite(profitRate) ? profitRate.toFixed(2) : '0.00')}%
-                                </span>
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              <span className="rounded bg-slate-800/60 px-2 py-1 text-[10px] font-bold uppercase text-slate-300">
+                                {exchangeName}
+                              </span>
+                              <span className="rounded bg-slate-800/40 px-2 py-1 text-[10px] font-bold text-slate-400">
+                                {stock.qty}
+                              </span>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-2 gap-2">
+                              <div className="rounded-md bg-slate-950/50 px-2.5 py-2">
+                                <p className="text-[10px] font-bold text-slate-500">AVG</p>
+                                <p className="mt-1 truncate font-mono text-xs font-bold text-slate-200">
+                                  {formatUnitCurrency(stock.avg_price, stockCurrency, currentDisplayCurrency, exchangeRate)}
+                                </p>
                               </div>
-
-                              <dl className="mt-4 grid grid-cols-2 gap-2 text-xs">
-                                {[
-                                  ['보유수량', stock.qty],
-                                  ['평균단가', formatUnitCurrency(stock.avg_price, stockCurrency, currentDisplayCurrency, exchangeRate)],
-                                  ['현재가', formatUnitCurrency(stock.current_price, stockCurrency, currentDisplayCurrency, exchangeRate)],
-                                  ['평가손익', `${stock.profit > 0 ? '+' : ''}${formatCurrency(stock.profit, stockCurrency, currentDisplayCurrency, exchangeRate)}`],
-                                ].map(([label, value]) => (
-                                  <div key={label} className="rounded border border-slate-800 bg-black/20 px-3 py-2">
-                                    <dt className="font-bold text-slate-500">{label}</dt>
-                                    <dd className={`mt-1 truncate font-mono font-bold ${label === '평가손익' ? (stock.profit > 0 ? 'text-red-400' : stock.profit < 0 ? 'text-blue-400' : 'text-white') : 'text-slate-100'}`}>
-                                      {value}
-                                    </dd>
-                                  </div>
-                                ))}
-                              </dl>
-                            </article>
-                          )
-                        })}
+                              <div className="rounded-md bg-slate-950/50 px-2.5 py-2">
+                                <p className="text-[10px] font-bold text-slate-500">NOW</p>
+                                <p className="mt-1 truncate font-mono text-xs font-bold text-slate-100">
+                                  {formatUnitCurrency(stock.current_price, stockCurrency, currentDisplayCurrency, exchangeRate)}
+                                </p>
+                              </div>
+                              <div className="col-span-2 rounded-md bg-slate-950/50 px-2.5 py-2">
+                                <p className="text-[10px] font-bold text-slate-500">PNL</p>
+                                <p className={`mt-1 truncate font-mono text-sm font-bold ${profitTone}`}>
+                                  {stock.profit > 0 ? '+' : ''}{formatCurrency(stock.profit, stockCurrency, currentDisplayCurrency, exchangeRate)}
+                                </p>
+                              </div>
+                            </div>
+                          </article>
+                        )
+                      })}
                     </div>
-                  </div>
                   ) : (
-                  <div className="overflow-x-auto">
+                    <div className="overflow-x-auto">
                     <table className="w-full table-fixed text-left border-collapse text-xs">
                       <thead className="block border-b border-slate-800 bg-[#0c0e15]/100 text-slate-400 [&>tr]:table [&>tr]:w-full [&>tr]:table-fixed">
                         <tr>
@@ -1806,7 +1812,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                               <td className={`py-3 px-3 text-right font-semibold ${stock.profit > 0 ? 'text-red-400' : stock.profit < 0 ? 'text-blue-400' : 'text-white'}`}>
                                 {stock.profit > 0 ? '+' : ''}{formatCurrency(stock.profit, stockCurrency, currentDisplayCurrency, exchangeRate)}
                               </td>
-                              <td className="py-3 px-3 text-right font-semibold">
+                              <td className={`py-3 px-3 text-right font-semibold`}>
                                 <Rate value={(profitRate >= 0 ? '+' : '') + (Number.isFinite(profitRate) ? profitRate.toFixed(2) : '0.00') + '%'} />
                               </td>
                             </tr>
@@ -1814,7 +1820,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                         })}
                       </tbody>
                     </table>
-                  </div>
+                    </div>
                   )
                 ) : (
                   <div className="flex-1 flex flex-col justify-center items-center py-16 text-center">
@@ -1822,7 +1828,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                     </svg>
                     <p className="text-xs font-semibold text-slate-400">대시보드 자산 데이터가 비활성화되어 있습니다.</p>
-                    <p className="text-[11px] text-slate-500 mt-1 max-w-sm">백엔드에서 계좌 자산 데이터가 연결되면 보유 종목과 평가 손익을 표시합니다.</p>
+                    <p className="text-[11px] text-slate-500 mt-1 max-w-sm">백엔드에서 계좌 자산 데이터가 연결되면 보유 종목과 평가 손익이 표시됩니다.</p>
                   </div>
                 )}
               </div>
@@ -1836,7 +1842,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                   <div>
                     <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-300">Cash Detail</p>
                     <h2 className="mt-1 text-base font-bold text-white">거래소별 + 통화별 예수금 상세</h2>
-                    <p className="mt-1 text-xs text-slate-400">토스의 공식 buying-power, 한투의 계좌 예수금 응답 기준으로 표시합니다.</p>
+                    <p className="mt-1 text-xs text-slate-400">토스는 공식 `buying-power`, 한투는 계좌 예수금 응답 기준으로 표시합니다.</p>
                   </div>
                   <button
                     type="button"
@@ -1852,7 +1858,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                       <tr>
                         <th className="px-3 py-2 text-left font-bold">계좌</th>
                         <th className="px-3 py-2 text-left font-bold">통화</th>
-                        <th className="px-3 py-2 text-right font-bold">잔고</th>
+                        <th className="px-3 py-2 text-right font-bold">원금액</th>
                         <th className="px-3 py-2 text-right font-bold">KRW 환산</th>
                         <th className="px-3 py-2 text-left font-bold">소스</th>
                       </tr>
@@ -1910,7 +1916,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
 
                 <div className="mt-4 grid gap-4 md:grid-cols-2">
                   <div className="rounded-lg border border-slate-800 bg-[#0c0e15]/50 p-4">
-                    <h3 className="text-xs font-bold text-white">거래소별 평가 자산</h3>
+                    <h3 className="text-xs font-bold text-white">거래소별 평가자산</h3>
                     <div className="mt-3 divide-y divide-slate-800/60">
                       {selectedSummaryDetail.totalEntries.length > 0 ? selectedSummaryDetail.totalEntries.map((entry) => (
                         <div key={`${selectedSummaryDetail.currency}-total-${entry.source}`} className="flex items-center justify-between gap-3 py-2 text-xs">
@@ -1918,7 +1924,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                           <span className="font-mono font-bold text-white">{formatSummaryCurrency(entry.amount, selectedSummaryDetail.currency)}</span>
                         </div>
                       )) : (
-                        <p className="py-6 text-center text-xs text-slate-500">표시할 평가 자산이 없습니다.</p>
+                        <p className="py-6 text-center text-xs text-slate-500">표시할 평가자산이 없습니다.</p>
                       )}
                     </div>
                   </div>
@@ -1941,9 +1947,15 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
             </div>
           ) : null}
 
-          {activeTab === 'watchlist' && <WatchlistTab displayCurrency={displayCurrency} exchangeRate={balance?.exchange_rate} mobileLayout={mobileLayout} />}
+          {activeTab === 'watchlist' && (
+            <MobileWatchlistTab
+              displayCurrency={displayCurrency}
+              exchangeRate={balance?.exchange_rate}
+              mobileLayout={mobileLayout}
+            />
+          )}
           {activeTab === 'assets' && (
-            <AssetsTab
+            <MobileAssetsTab
               balance={balance}
               allocation={allocation}
               accountBalances={rawBalances}
@@ -1955,18 +1967,17 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
               mobileLayout={mobileLayout}
             />
           )}
-          {activeTab === 'history' && <TradeHistoryTab mobileLayout={mobileLayout} />}
+          {activeTab === 'history' && <MobileTradeHistoryTab mobileLayout={mobileLayout} />}
           {activeTab === 'admin' && (
-            <AdminMlData
+            <MobileAdminMlData
               isLoggedIn={isLoggedIn}
               userEmail={userEmail}
               handleLogout={handleLogout}
               hideHeader={true}
-              mobileLayout={mobileLayout}
             />
           )}
           {activeTab === 'settings' && (
-            <Settings
+            <MobileSettings
               isLoggedIn={isLoggedIn}
               userEmail={userEmail}
               handleLogout={handleLogout}

@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
-import Header from '../components/Header.jsx'
-import { supabase } from '../supabaseClient'
-import AdminInquiries from './AdminInquiries.jsx'
+import Header from '../../components/Header.jsx'
+import { supabase } from '../../supabaseClient'
+import MobileAdminInquiries from './MobileAdminInquiries.jsx'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5050'
 
@@ -3339,7 +3339,7 @@ export default function AdminMlData({ isLoggedIn, userEmail, handleLogout, hideH
         )}
 
         {adminTab === 'inquiries' && (
-          <AdminInquiries
+          <MobileAdminInquiries
             isLoggedIn={isLoggedIn}
             userEmail={userEmail}
             handleLogout={handleLogout}

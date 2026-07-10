@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { createChart, CandlestickSeries } from 'lightweight-charts'
-import { ensureNewsSummaries } from '../lib/supabaseClient.js'
-import { deleteUserWatchlistItem, fetchUserWatchlist, supabase, updateUserWatchlistOrder } from '../supabaseClient'
-import AssetLogo from '../components/AssetLogo.jsx'
-import { SectionHeader } from '../components/DashboardComponents.jsx'
-import { formatNewsDate, mergeLatestNews } from '../dashboardUtils.js'
+import { ensureNewsSummaries } from '../../lib/supabaseClient.js'
+import { deleteUserWatchlistItem, fetchUserWatchlist, supabase, updateUserWatchlistOrder } from '../../supabaseClient'
+import AssetLogo from '../../components/AssetLogo.jsx'
+import { SectionHeader } from '../../components/DashboardComponents.jsx'
+import { formatNewsDate, mergeLatestNews } from '../../dashboardUtils.js'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5050'
 
@@ -328,7 +328,7 @@ function WatchlistCandlestickChart({ item, assetType, cryptoChartMode, onCryptoC
               {cryptoChartModes.map((option) => (
                 <button
                   key={option.value}
-                  className={`${compact ? 'h-5 min-w-6 px-1.5' : 'h-6 min-w-7 px-2'} rounded text-[10px] font-black transition ${cryptoChartMode === option.value ? 'bg-cyan-500 text-slate-950 shadow-[0_0_12px_rgba(34,211,238,0.18)]' : 'text-slate-400 hover:bg-cyan-500/10 hover:text-cyan-200'}`}
+                className={`${compact ? 'h-5 min-w-6 px-1.5' : 'h-6 min-w-7 px-2'} rounded text-[10px] font-black transition ${cryptoChartMode === option.value ? 'bg-cyan-500 text-slate-950 shadow-[0_0_12px_rgba(34,211,238,0.18)]' : 'text-slate-400 hover:bg-cyan-500/10 hover:text-cyan-200'}`}
                   type="button"
                   title={option.title}
                   onClick={() => onCryptoChartModeChange?.(option.value)}
@@ -421,7 +421,7 @@ export default function WatchlistTab({ displayCurrency = 'KRW', exchangeRate = 1
     ? watchlistItems
     : watchlistItems.filter((item) => getWatchlistMarketFilterKey(item) === marketFilter)
   const selectedItem = filteredWatchlistItems.find((item) => item.id === selectedId) || filteredWatchlistItems[0]
-  const useSlider = !mobileLayout && filteredWatchlistItems.length >= 5
+  const useSlider = filteredWatchlistItems.length >= 5
 
   const assetType = selectedItem?.assetType || (selectedItem?.market === '코인' ? 'CRYPTO' : 'STOCK')
   const selectedCurrency = assetType === 'CRYPTO'
@@ -694,15 +694,15 @@ export default function WatchlistTab({ displayCurrency = 'KRW', exchangeRate = 1
   }
 
   return (
-    <main className={`max-w-7xl mx-auto flex flex-col ${mobileLayout ? 'gap-4' : 'gap-6'}`}>
+    <main className="max-w-7xl mx-auto flex flex-col gap-6">
       <section className={`bg-slate-surface border border-slate-700/80 rounded-lg ${mobileLayout ? 'p-3' : 'p-5'}`}>
         <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <SectionHeader title="관심종목 명단" />
-          <div className={`${mobileLayout ? 'flex w-full overflow-x-auto' : 'inline-flex w-fit'} rounded-md border border-slate-700/80 bg-[#0f172a] p-1`}>
+          <div className="inline-flex w-fit rounded-md border border-slate-700/80 bg-[#0f172a] p-1">
             {WATCHLIST_MARKET_FILTERS.map((filter) => (
               <button
                 key={filter.key}
-                className={`shrink-0 rounded px-2.5 py-1 text-[10px] font-bold transition ${
+                className={`rounded px-2.5 py-1 text-[10px] font-bold transition ${
                   marketFilter === filter.key
                     ? 'bg-ai-cyan text-slate-950'
                     : 'text-slate-400 hover:text-white'
@@ -715,13 +715,13 @@ export default function WatchlistTab({ displayCurrency = 'KRW', exchangeRate = 1
             ))}
           </div>
         </div>
-        <div className={useSlider ? 'flex snap-x gap-2 overflow-x-auto pb-2' : `grid gap-2 ${mobileLayout ? '' : 'md:grid-cols-2 xl:grid-cols-4'}`}>
+        <div className={useSlider ? 'flex snap-x gap-2 overflow-x-auto pb-2' : 'grid gap-2 md:grid-cols-2 xl:grid-cols-4'}>
           {filteredWatchlistItems.map((item) => {
             const isRemoving = removingWatchlistIds.has(item.id)
             return (
               <div
                 key={item.id}
-                className={`${useSlider ? 'min-w-60 snap-start' : 'w-full'} cursor-grab rounded-lg border ${mobileLayout ? 'px-3 py-2.5' : 'px-4 py-3'} text-left transition active:cursor-grabbing ${
+                className={`${useSlider ? 'min-w-60 snap-start' : 'w-full'} cursor-grab rounded-lg border px-4 py-3 text-left transition active:cursor-grabbing ${
                   selectedItem?.id === item.id
                     ? 'border-institutional-blue bg-institutional-blue text-white'
                     : 'border-transparent bg-[#0f172a] text-slate-300 hover:bg-white/5'
@@ -809,7 +809,7 @@ export default function WatchlistTab({ displayCurrency = 'KRW', exchangeRate = 1
         {watchlistError ? <p className="mt-3 text-xs text-red-300">{watchlistError}</p> : null}
       </section>
 
-      <section className={`bg-slate-surface border border-slate-700/80 rounded-lg ${mobileLayout ? 'p-3' : 'p-5'}`}>
+      <section className="bg-slate-surface border border-slate-700/80 rounded-lg p-5">
         <div className="flex justify-between items-center mb-3">
           <SectionHeader title="관심 종목의 차트" action={selectedItem?.id} />
           {selectedItem && (
@@ -839,11 +839,7 @@ export default function WatchlistTab({ displayCurrency = 'KRW', exchangeRate = 1
           {chartDetailCards.map((card) => (
             <div
               key={card.label}
-              className={`rounded-lg bg-[#0f172a] ${mobileLayout ? 'px-3 py-2' : 'p-4'} ${
-                mobileLayout && (card.label === chartDetailCards[0]?.label || card.label === chartDetailCards[3]?.label)
-                  ? 'col-span-2'
-                  : ''
-              }`}
+              className={`rounded-lg bg-[#0f172a] ${mobileLayout ? 'px-3 py-2' : 'p-4'} ${mobileLayout && (card.label === chartDetailCards[0]?.label || card.label === chartDetailCards[3]?.label) ? 'col-span-2' : ''}`}
             >
               <p className="text-xs font-bold text-slate-500">{card.label}</p>
               <p className={`${mobileLayout ? 'mt-1' : 'mt-2'} font-mono font-bold ${card.tone || 'text-white'}`}>{card.value}</p>
@@ -852,9 +848,9 @@ export default function WatchlistTab({ displayCurrency = 'KRW', exchangeRate = 1
         </div>
       </section>
 
-      <section className={`bg-slate-surface border border-slate-700/80 rounded-lg ${mobileLayout ? 'p-3' : 'p-5'}`}>
+      <section className="bg-slate-surface border border-slate-700/80 rounded-lg p-5">
         <SectionHeader title="선택 종목의 최근 뉴스" />
-        <div className={`grid ${mobileLayout ? 'gap-2.5' : 'gap-3 lg:grid-cols-2'}`}>
+        <div className="grid gap-3 lg:grid-cols-2">
           {newsLoading && newsItems.length === 0 ? (
             <div className="rounded-lg border border-slate-800 bg-[#0f172a] p-4 text-sm text-slate-400 lg:col-span-2">
               최신 뉴스피드를 불러오는 중입니다...
@@ -894,15 +890,15 @@ export default function WatchlistTab({ displayCurrency = 'KRW', exchangeRate = 1
             const isLoadingSummary = summaryLoadingId === news.id
 
             return (
-              <article key={articleId} className={`rounded-lg border border-slate-800 bg-[#0f172a] ${mobileLayout ? 'p-3' : 'p-4'}`}>
-                <div className={`${mobileLayout ? 'flex flex-wrap' : 'flex items-center justify-between'} gap-2 text-xs text-slate-500`}>
+              <article key={articleId} className="rounded-lg border border-slate-800 bg-[#0f172a] p-4">
+                <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
                   <span className="font-bold text-ai-cyan">{news.source}</span>
                   <span className="font-mono">{formatNewsDate(news.published_at)}</span>
                 </div>
-                <h3 className={`${mobileLayout ? 'mt-2 leading-5' : 'mt-3 leading-6'} break-words text-sm font-bold text-white`}>{news.title}</h3>
+                <h3 className="mt-3 break-words text-sm font-bold leading-6 text-white">{news.title}</h3>
                 <p className="mt-2 text-xs text-slate-500">{news.company_name || news.symbol || selectedItem?.name}</p>
 
-                <div className={`mt-3 rounded-lg border border-slate-800 bg-black/20 ${mobileLayout ? 'p-2.5' : 'p-3'}`}>
+                <div className="mt-3 rounded-lg border border-slate-800 bg-black/20 p-3">
                   <p className="break-words whitespace-pre-line text-sm leading-6 text-slate-300">
                     {isExpanded
                       ? news.ai_summary || (isLoadingSummary ? '요약을 생성하는 중입니다...' : '요약 보기 버튼을 눌러 3줄 요약을 생성하세요.')
@@ -917,7 +913,7 @@ export default function WatchlistTab({ displayCurrency = 'KRW', exchangeRate = 1
                   ) : null}
                 </div>
 
-                <div className={`${mobileLayout ? 'mt-3 grid grid-cols-2' : 'mt-4 flex flex-wrap justify-end'} gap-2`}>
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
                   <button
                     className="rounded border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500"
                     type="button"
@@ -935,7 +931,7 @@ export default function WatchlistTab({ displayCurrency = 'KRW', exchangeRate = 1
                   </button>
 
                   <a
-                    className="rounded bg-blue-600 px-3 py-1.5 text-center text-xs font-semibold text-white"
+                    className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-black"
                     href={news.url || '#'}
                     rel="noreferrer"
                     target="_blank"

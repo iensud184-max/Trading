@@ -213,6 +213,8 @@ class ChatbotLLMClient:
         reply_parts = []
         usage = {}
         tool_call_deltas: dict[int, dict] = {}
+        response_mode = None
+        saw_done = False
 
         for raw_line in response.iter_lines(decode_unicode=True):
             if isinstance(raw_line, bytes):
@@ -224,6 +226,7 @@ class ChatbotLLMClient:
 
             event_data = line[5:].strip()
             if event_data == "[DONE]":
+                saw_done = True
                 break
             if not event_data:
                 continue
@@ -232,6 +235,10 @@ class ChatbotLLMClient:
                 chunk = json.loads(event_data)
             except (TypeError, ValueError) as error:
                 raise RuntimeError("OpenAI 챗봇 스트림 응답을 해석하지 못했습니다.") from error
+            if not isinstance(chunk, dict):
+                raise RuntimeError("OpenAI 챗봇 스트림 응답을 해석하지 못했습니다.")
+            if chunk.get("error"):
+                raise RuntimeError("OpenAI 챗봇 스트림 처리에 실패했습니다.")
 
             chunk_usage = chunk.get("usage")
             if isinstance(chunk_usage, dict):
@@ -242,11 +249,20 @@ class ChatbotLLMClient:
                 continue
             delta = choices[0].get("delta") or {}
             content = delta.get("content")
-            if isinstance(content, str) and content:
+            tool_call_chunks = delta.get("tool_calls") or []
+            if response_mode is None:
+                if tool_call_chunks:
+                    response_mode = "tool"
+                elif isinstance(content, str) and content:
+                    response_mode = "text"
+
+            if response_mode == "text" and isinstance(content, str) and content:
                 reply_parts.append(content)
                 on_delta(content)
 
-            for tool_call_delta in delta.get("tool_calls") or []:
+            if response_mode != "tool":
+                continue
+            for tool_call_delta in tool_call_chunks:
                 index = tool_call_delta.get("index")
                 if not isinstance(index, int):
                     index = len(tool_call_deltas)
@@ -272,6 +288,9 @@ class ChatbotLLMClient:
                 arguments = function_delta.get("arguments")
                 if isinstance(arguments, str):
                     current["function"]["arguments"] += arguments
+
+        if not saw_done:
+            raise RuntimeError("OpenAI 챗봇 스트림이 비정상 종료되었습니다.")
 
         reply_text = "".join(reply_parts)
         if not reply_text:

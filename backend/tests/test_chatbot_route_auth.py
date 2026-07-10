@@ -199,6 +199,37 @@ def test_chatbot_stream_worker_has_app_context_and_logs_request_id(monkeypatch):
     assert logged[0][1][1] == "user-1"
 
 
+def test_chatbot_stream_partial_delta_ends_with_error_not_done(monkeypatch):
+    monkeypatch.setattr(
+        "backend.routes.chatbot.validate_access_token",
+        lambda auth_header: ("user-1", "token"),
+    )
+
+    def fake_reply(
+        message,
+        user_id=None,
+        auth_header=None,
+        user_timezone=None,
+        trace_callback=None,
+        delta_callback=None,
+    ):
+        delta_callback("부분 답변")
+        raise RuntimeError("stream failed")
+
+    monkeypatch.setattr("backend.routes.chatbot.chatbot_service.reply", fake_reply)
+    response = app.test_client().post(
+        "/api/chatbot/stream",
+        headers={"Authorization": "Bearer valid"},
+        json={"message": "질문"},
+    )
+    body = response.get_data(as_text=True)
+
+    assert '"text": "부분 답변"' in body
+    assert "event: error" in body
+    assert "event: done" not in body
+    assert '"request_id"' in body
+
+
 def test_validate_access_token_matches_supabase_user(monkeypatch):
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")

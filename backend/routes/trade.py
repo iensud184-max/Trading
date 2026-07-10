@@ -29,6 +29,7 @@ PRICE_CHANGE_CACHE_TTL = 10
 CACHE_TTL_SECONDS = 10  # 기본값 10초 유효
 LEVEL2_CACHE_TTL_SECONDS = 10
 REAL_ORDER_LIMIT_KRW = 100000.0
+USD_KRW_FALLBACK = 1500.0
 SUPPORTED_TRADE_EXCHANGES = {"TOSS", "KIS", "COINONE", "BINANCE", "BINANCE_UM_FUTURES"}
 CRYPTO_EXCHANGES = {"COINONE", "BINANCE", "BINANCE_UM_FUTURES"}
 
@@ -1425,7 +1426,18 @@ def _build_precheck_payload(
         if normalized_futures_options
         else estimated_amount
     )
-    estimated_amount_krw = estimated_amount * 1400.0 if exchange in ("BINANCE", "BINANCE_UM_FUTURES") else estimated_amount
+    exchange_rate = 1.0
+    if exchange == "TOSS" and determine_market_country(symbol) == "US":
+        exchange_rate = USD_KRW_FALLBACK
+        try:
+            live_exchange_rate = float(client.get_exchange_rate())
+            if live_exchange_rate > 0:
+                exchange_rate = live_exchange_rate
+        except Exception:
+            pass
+    elif exchange in ("BINANCE", "BINANCE_UM_FUTURES"):
+        exchange_rate = USD_KRW_FALLBACK
+    estimated_amount_krw = estimated_amount * exchange_rate
     balance_snapshot = _extract_balance_snapshot(client, symbol)
     available_cash = balance_snapshot["available_cash"]
     holding_qty = balance_snapshot["holding_qty"]
@@ -1558,6 +1570,7 @@ def _build_precheck_payload(
         "price_source": price_source,
         "estimated_amount": estimated_amount,
         "estimated_amount_krw": estimated_amount_krw,
+        "exchange_rate": exchange_rate,
         "required_margin": required_margin,
         "futures_options": normalized_futures_options,
         "real_order_limit_krw": REAL_ORDER_LIMIT_KRW,

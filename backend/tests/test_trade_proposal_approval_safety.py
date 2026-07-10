@@ -36,6 +36,22 @@ class FakeOrderClient:
         }
 
 
+class TossClient(FakeOrderClient):
+    def get_exchange_rate(self):
+        return 1500.0
+
+    def get_balance(self):
+        return {
+            "available_cash": 10000.0,
+            "available_cash_details": {
+                "components": [
+                    {"currency": "USD", "cash_buying_power": 10000.0},
+                ],
+            },
+            "holdings": [],
+        }
+
+
 def test_real_order_limit_applies_only_to_real_orders():
     assert _exceeds_real_order_limit("REAL", 100001) is True
     assert _exceeds_real_order_limit("REAL", 100000) is False
@@ -126,6 +142,56 @@ def test_manual_real_order_limit_blocks_before_exchange_order(monkeypatch):
             "action": "BUY",
             "order_type": "LIMIT",
             "price": 100001,
+            "quantity": 1,
+            "broker_env": "REAL",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "100,000원" in response.get_json()["message"]
+    assert order_client.place_order_calls == 0
+
+
+def test_toss_us_precheck_converts_order_amount_to_krw(monkeypatch):
+    order_client = TossClient()
+    monkeypatch.setattr(trade, "_build_exchange_client", lambda *args: order_client)
+    monkeypatch.setattr(trade, "is_us_market_open", lambda client: True)
+
+    precheck = trade._build_precheck_payload(
+        exchange="TOSS",
+        symbol="AAPL",
+        action="BUY",
+        order_type="LIMIT",
+        quantity=1,
+        price=70,
+        broker_env="REAL",
+        record={},
+        access_key="access",
+        secret_key="secret",
+    )
+
+    assert precheck["currency"] == "USD"
+    assert precheck["estimated_amount_krw"] == 105000
+    assert precheck["exceeds_real_order_limit"] is True
+
+
+def test_toss_us_real_order_limit_blocks_before_exchange_order(monkeypatch):
+    order_client = TossClient()
+    monkeypatch.setattr(trade, "get_user_id_from_header", lambda auth_header: ("user-1", "token"))
+    monkeypatch.setattr(trade, "_load_user_exchange_record", lambda *args: ({}, "access", "secret"))
+    monkeypatch.setattr(trade, "_build_exchange_client", lambda *args: order_client)
+    monkeypatch.setattr(trade, "is_us_market_open", lambda client: True)
+    monkeypatch.setattr(trade, "_insert_trade_proposal_with_schema_fallback", lambda *args: None)
+
+    response = app.test_client().post(
+        "/api/trade/order",
+        headers={"Authorization": "Bearer test"},
+        json={
+            "exchange": "TOSS",
+            "symbol": "AAPL",
+            "action": "BUY",
+            "order_type": "LIMIT",
+            "price": 70,
             "quantity": 1,
             "broker_env": "REAL",
         },

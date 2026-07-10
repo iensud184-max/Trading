@@ -94,11 +94,15 @@ erDiagram
     *   `raw_order_payload` (JSONB) - 거래소에서 반환한 응답 JSON 전문
     *   `broker_env` (TEXT) - `MOCK`(모의), `REAL`(실거래)
     *   `created_at` (TIMESTAMPTZ)
+    *   `approved_at` (TIMESTAMPTZ) - 승인 실행 선점 시각
     *   `modified_at` (TIMESTAMPTZ) - 주문 정정 시점
     *   `canceled_at` (TIMESTAMPTZ) - 주문 취소 시점
 *   **RLS & Realtime**:
     *   Supabase Realtime 구독이 활성화되어 있어 백엔드 생성 즉시 프론트엔드로 승인 팝업 노출.
     *   `auth.uid() = user_id` 사용자만 읽기 및 관리 가능.
+*   **원자 승인 RPC**:
+    *   `claim_trade_proposal_for_execution(p_proposal_id uuid)`는 호출 사용자가 소유한 `PENDING` 제안만 `APPROVED`로 변경하고 `approved_at`을 기록합니다. 이미 선점된 제안은 반환되지 않습니다.
+    *   함수는 `SECURITY INVOKER`로 실행하며 `authenticated`, `service_role`만 실행할 수 있습니다.
 *   **현재 구현 메모**:
     *   `COINONE` 실주문은 백엔드 `trade` 라우트에서 지정가(`LIMIT`) 매수/매도와 미체결 주문 취소까지 연결되어 있습니다.
     *   `COINONE` 시장가(`MARKET`) 주문은 API 정책 검증 전까지 프론트엔드와 백엔드에서 차단합니다.
@@ -423,6 +427,11 @@ erDiagram
     *   로그인 사용자의 최근 12개 메시지를 `created_at` 및 `id` 역순으로 읽어 LLM 문맥에 복원합니다.
     *   사용자 입력과 AI 답변은 한 번의 요청에서 각각 `user`, `assistant` 행으로 저장합니다.
     *   비로그인 요청은 API 인증 단계에서 차단하며, 익명 사용자용 공용 대화 키나 이력을 생성하지 않습니다.
+
+### chatbot_conversation_states
+* **용도**: 여러 Flask 워커가 공유해야 하는 챗봇 대기 작업과 최근 추천 후보를 사용자별로 저장합니다.
+* **TTL**: `pending_expires_at`, `recommendation_expires_at`이 지난 상태는 대화 해석에 사용하지 않습니다.
+* **RLS**: `authenticated` 사용자는 `auth.uid() = user_id`인 자신의 행만 조회·삽입·수정·삭제할 수 있습니다.
 
 ### 2.17 chatbot_usage_counters
 *   **용도**: 여러 Flask 워커가 공유하는 챗봇 분당 요청 수와 일일 토큰 예약량을 원자적으로 관리합니다.

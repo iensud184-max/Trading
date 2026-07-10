@@ -28,10 +28,51 @@ ORDER_KEYWORDS = (
     "처분",
 )
 
+ORDER_CREATION_PATTERNS = (
+    "매매 제안",
+    "매수 제안",
+    "매도 제안",
+    "주문 만들어",
+    "주문해",
+    *ORDER_KEYWORDS,
+)
+
+ORDER_READ_PATTERNS = (
+    "주문내역",
+    "주문 내역",
+    "미체결 주문",
+    "열린 주문",
+)
+
+ORDER_STRATEGY_PATTERNS = (
+    "전략",
+    "타이밍",
+    "비중",
+    "시나리오",
+    "리밸런싱",
+)
+
+DIRECT_ORDER_CREATION_PATTERNS = (
+    "매매 제안",
+    "매수 제안",
+    "매도 제안",
+    "주문 만들어",
+    "주문해",
+    "사줘",
+    "사자",
+    "구매",
+    "팔아줘",
+    "팔자",
+    "처분",
+)
+
 BUY_KEYWORDS = ("사줘", "사자", "매수", "구매", "담아")
 SELL_KEYWORDS = ("팔아줘", "팔자", "매도", "처분", "정리")
 COMMAND_WORDS = (
-    *ORDER_KEYWORDS,
+    *ORDER_CREATION_PATTERNS,
+    "제안",
+    "만들어줘",
+    "만들어",
     "모의",
     "실거래",
     "실전",
@@ -49,7 +90,14 @@ COMMAND_WORDS = (
 
 def parse_order_intent(message: str) -> ParsedOrderIntent:
     text = str(message or "").strip()
-    if not text or not any(keyword in text for keyword in ORDER_KEYWORDS):
+    if not text or any(pattern in text for pattern in ORDER_READ_PATTERNS):
+        return ParsedOrderIntent(is_order_request=False)
+    if (
+        any(pattern in text for pattern in ORDER_STRATEGY_PATTERNS)
+        and not any(pattern in text for pattern in DIRECT_ORDER_CREATION_PATTERNS)
+    ):
+        return ParsedOrderIntent(is_order_request=False)
+    if not any(pattern in text for pattern in ORDER_CREATION_PATTERNS):
         return ParsedOrderIntent(is_order_request=False)
 
     side = _detect_side(text)
@@ -60,9 +108,8 @@ def parse_order_intent(message: str) -> ParsedOrderIntent:
     sell_ratio = _extract_sell_ratio(text) if side == "SELL" else None
     order_type = "LIMIT" if price and price > 0 else "MARKET"
 
-    has_order_size = quantity is not None or amount_krw is not None or sell_ratio is not None
     return ParsedOrderIntent(
-        is_order_request=bool(side and symbol_query and (has_order_size or _has_direct_order_phrase(text))),
+        is_order_request=True,
         side=side,
         symbol_query=symbol_query,
         quantity=quantity,
@@ -80,24 +127,6 @@ def _detect_side(text: str) -> str | None:
     if any(keyword in text for keyword in BUY_KEYWORDS):
         return "BUY"
     return None
-
-
-def _has_direct_order_phrase(text: str) -> bool:
-    return any(
-        keyword in text
-        for keyword in (
-            "사줘",
-            "사자",
-            "팔아줘",
-            "팔자",
-            "매수해",
-            "매수해줘",
-            "매도해",
-            "매도해줘",
-            "구매해",
-            "구매해줘",
-        )
-    )
 
 
 def _detect_broker_env(text: str) -> str | None:
@@ -129,7 +158,7 @@ def _extract_quantity(text: str) -> float | None:
 
 
 def _extract_amount_krw(text: str) -> float | None:
-    match = re.search(r"(\d+(?:\.\d+)?)\s*(만원|천원|원|만)\s*(?:어치)?", text)
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(만원|천원|원|만)(?!\s*에)\s*(?:어치)?", text)
     if match:
         amount = _to_float(match.group(1))
         unit = match.group(2)
@@ -139,7 +168,10 @@ def _extract_amount_krw(text: str) -> float | None:
             return amount * 1000
         return amount
 
-    korean_match = re.search(r"([일한이삼사오육칠팔구십백천만]+)\s*(원|만원|천원|만)\s*(?:어치)?", text)
+    korean_match = re.search(
+        r"([일한이삼사오육칠팔구십백천만]+)\s*(원|만원|천원|만)(?!\s*에)\s*(?:어치)?",
+        text,
+    )
     if korean_match:
         parsed = _parse_korean_amount(korean_match.group(1))
         return parsed if parsed > 0 else None

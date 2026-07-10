@@ -14,7 +14,6 @@ from backend.services.chatbot.prompt_registry import build_system_prompt
 from backend.services.chatbot.rag_service import ChatbotRAGService
 from backend.services.chatbot.tool_registry import (
     add_watchlist_item,
-    create_trade_proposal,
     get_exchange_rate,
     get_holdings,
     get_home_market_rankings,
@@ -389,9 +388,6 @@ class ChatbotService:
             arguments = {}
 
         enforce_tool_safety(tool_name, arguments)
-        if tool_name == "create_trade_proposal":
-            return create_trade_proposal(auth_header, arguments)
-
         tool_map = {
             "get_home_market_rankings": get_home_market_rankings,
             "get_portfolio_summary": get_portfolio_summary,

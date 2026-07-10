@@ -8,8 +8,24 @@ from backend.services.chatbot.safety_guard import (
     enforce_tool_safety,
 )
 from backend.services.chatbot import tool_registry
+from backend.services.chatbot.function_calling import FUNCTION_SCHEMAS
 from backend.services.chatbot.tool_registry import create_trade_proposal, run_chatbot_tool
 from backend.routes.trade import _resolve_proposal_order_data
+
+
+def _valid_precheck(reference_price=800, estimated_amount_krw=8000, **overrides):
+    precheck = {
+        "reference_price": reference_price,
+        "estimated_amount_krw": estimated_amount_krw,
+        "is_market_closed": False,
+        "insufficient_cash": False,
+        "insufficient_holding": False,
+        "insufficient_permission": False,
+        "futures_real_blocked": False,
+        "exceeds_real_order_limit": False,
+    }
+    precheck.update(overrides)
+    return precheck
 
 
 def test_safety_guard_separates_read_write_proposal_and_order_risks():
@@ -22,6 +38,10 @@ def test_safety_guard_separates_read_write_proposal_and_order_risks():
 def test_safety_guard_blocks_order_tool_before_execution():
     with pytest.raises(SafetyGuardError):
         enforce_tool_safety("place_order", {})
+
+
+def test_llm_schema_does_not_expose_trade_proposal_creation():
+    assert "create_trade_proposal" not in {schema["name"] for schema in FUNCTION_SCHEMAS}
 
 
 def test_create_trade_proposal_only_inserts_pending_record(monkeypatch):
@@ -57,6 +77,11 @@ def test_create_trade_proposal_only_inserts_pending_record(monkeypatch):
             "quantity": 10,
             "price": 800,
             "broker_env": "MOCK",
+            "raw_order_payload": {
+                "precheck_status": "OK",
+                "precheck": _valid_precheck(),
+                "source": "CHATBOT_ORDER_PARSER",
+            },
         },
     )
 
@@ -64,6 +89,54 @@ def test_create_trade_proposal_only_inserts_pending_record(monkeypatch):
     assert calls[0]["endpoint"] == "trade_proposals"
     assert calls[0]["method"] == "POST"
     assert calls[0]["json_data"]["status"] == "PENDING"
+
+
+def test_create_trade_proposal_rejects_missing_precheck(monkeypatch):
+    monkeypatch.setattr(tool_registry, "get_user_id_from_header", lambda auth_header: ("user-1", "test"))
+    monkeypatch.setattr(tool_registry, "query_supabase", lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("검증 없는 insert 금지")
+    ))
+
+    with pytest.raises(ValueError, match="사전검증"):
+        create_trade_proposal(
+            "Bearer test",
+            {
+                "exchange": "COINONE",
+                "asset_type": "CRYPTO",
+                "symbol": "XRP",
+                "side": "BUY",
+                "order_type": "LIMIT",
+                "quantity": 10,
+                "price": 800,
+                "broker_env": "MOCK",
+            },
+        )
+
+
+def test_create_trade_proposal_rejects_precheck_blocker(monkeypatch):
+    monkeypatch.setattr(tool_registry, "get_user_id_from_header", lambda auth_header: ("user-1", "test"))
+    monkeypatch.setattr(tool_registry, "query_supabase", lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("차단 사유가 있는 insert 금지")
+    ))
+
+    with pytest.raises(ValueError, match="현금"):
+        create_trade_proposal(
+            "Bearer test",
+            {
+                "exchange": "COINONE",
+                "asset_type": "CRYPTO",
+                "symbol": "XRP",
+                "side": "BUY",
+                "order_type": "LIMIT",
+                "quantity": 10,
+                "price": 800,
+                "broker_env": "MOCK",
+                "raw_order_payload": {
+                    "precheck_status": "OK",
+                    "precheck": _valid_precheck(insufficient_cash=True),
+                },
+            },
+        )
 
 
 def test_approval_order_uses_server_side_pending_proposal_fields(monkeypatch):
@@ -158,6 +231,11 @@ def test_run_chatbot_tool_creates_pending_proposal_from_limit_order_message(monk
             "market": "KR",
         },
     )
+    monkeypatch.setattr(
+        "backend.services.chatbot.tool_registry._run_chatbot_precheck",
+        lambda **kwargs: _valid_precheck(),
+        raising=False,
+    )
 
     result = run_chatbot_tool("Bearer test", "XRP 10개 800원에 모의로 사줘")
 
@@ -207,6 +285,11 @@ def test_run_chatbot_tool_calculates_quantity_for_amount_order(monkeypatch):
         "backend.services.chatbot.tool_registry.get_user_id_from_header",
         lambda auth_header: ("user-1", "test"),
     )
+    monkeypatch.setattr(
+        "backend.services.chatbot.tool_registry._run_chatbot_precheck",
+        lambda **kwargs: _valid_precheck(70000, 70000),
+        raising=False,
+    )
 
     result = run_chatbot_tool("Bearer test", "삼성전자 10만원어치 사줘")
 
@@ -242,6 +325,7 @@ def test_run_chatbot_tool_stores_precheck_payload_on_proposal(monkeypatch):
         return {
             "success": True,
             "data": {
+                "reference_price": 70000,
                 "estimated_amount_krw": 70000,
                 "available_cash": 200000,
                 "insufficient_cash": False,
@@ -351,7 +435,12 @@ def test_run_chatbot_tool_creates_proposal_from_last_recommendation_reference(mo
         "_get_internal",
         lambda path, auth_header, params=None: {"success": True, "data": {"current_price": 70000}},
     )
-    monkeypatch.setattr(tool_registry, "_post_internal", lambda path, auth_header, body=None: {"success": True, "data": {}})
+    monkeypatch.setattr(
+        tool_registry,
+        "_run_chatbot_precheck",
+        lambda **kwargs: _valid_precheck(70000, 70000),
+        raising=False,
+    )
     monkeypatch.setattr(tool_registry, "query_supabase", fake_query)
     monkeypatch.setattr(
         "backend.services.chatbot.conversation_repository.query_supabase",
@@ -433,6 +522,11 @@ def test_run_chatbot_tool_calculates_quantity_for_ratio_sell(monkeypatch):
         "backend.services.chatbot.tool_registry.get_user_id_from_header",
         lambda auth_header: ("user-1", "test"),
     )
+    monkeypatch.setattr(
+        "backend.services.chatbot.tool_registry._run_chatbot_precheck",
+        lambda **kwargs: _valid_precheck(150000, 600000),
+        raising=False,
+    )
 
     result = run_chatbot_tool("Bearer test", "하이닉스 절반 팔아줘")
 
@@ -441,3 +535,120 @@ def test_run_chatbot_tool_calculates_quantity_for_ratio_sell(monkeypatch):
     assert calls[0]["json_data"]["side"] == "SELL"
     assert calls[0]["json_data"]["volume"] == 4
     assert calls[0]["json_data"]["price"] == 150000
+
+
+def test_incomplete_proposal_request_never_calls_llm_or_inserts(monkeypatch):
+    inserted = []
+    monkeypatch.setattr(tool_registry, "query_supabase", lambda *args, **kwargs: inserted.append(kwargs))
+
+    result = run_chatbot_tool("Bearer test", "매매 제안 만들어줘")
+
+    assert result["data"]["reason"] == "missing_order_intent"
+    assert "종목" in result["reply"]
+    assert inserted == []
+
+
+def test_precheck_failure_does_not_insert_pending_proposal(monkeypatch):
+    monkeypatch.setattr(tool_registry, "_resolve_symbol", lambda *args: {
+        "symbol": "DOGE", "asset_type": "CRYPTO", "market": "KR",
+    })
+    monkeypatch.setattr(tool_registry, "_run_chatbot_precheck", lambda **kwargs: (_ for _ in ()).throw(
+        ValueError("등록된 COINONE (REAL) API 키가 없습니다.")
+    ))
+    monkeypatch.setattr(tool_registry, "query_supabase", lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("검증 실패 후 insert 금지")
+    ))
+
+    result = run_chatbot_tool("Bearer test", "도지 10개 100원에 실거래로 팔아줘")
+
+    assert result["data"]["reason"] == "precheck_failed"
+    assert "API 키" in result["reply"]
+
+
+def test_run_chatbot_precheck_requires_reference_price_and_estimated_amount(monkeypatch):
+    monkeypatch.setattr(
+        tool_registry,
+        "_post_internal",
+        lambda *args, **kwargs: {"success": True, "data": {"estimated_amount_krw": 8000}},
+    )
+
+    with pytest.raises(ValueError, match="현재가와 예상 주문금액"):
+        tool_registry._run_chatbot_precheck(
+            auth_header="Bearer test",
+            exchange="COINONE",
+            symbol="XRP",
+            side="BUY",
+            order_type="LIMIT",
+            quantity=10,
+            price=800,
+            broker_env="MOCK",
+        )
+
+
+def test_precheck_blockers_apply_real_order_limit_only_to_real_environment():
+    precheck = _valid_precheck(
+        is_market_closed=True,
+        insufficient_cash=True,
+        insufficient_holding=True,
+        insufficient_permission=True,
+        futures_real_blocked=True,
+        exceeds_real_order_limit=True,
+    )
+
+    mock_blockers = tool_registry._collect_precheck_blockers(precheck, "MOCK")
+    real_blockers = tool_registry._collect_precheck_blockers(precheck, "REAL")
+
+    assert len(mock_blockers) == 5
+    assert len(real_blockers) == 6
+    assert all("100,000원" not in blocker for blocker in mock_blockers)
+    assert any("100,000원" in blocker for blocker in real_blockers)
+
+
+def test_coinone_market_order_returns_limit_order_guide_without_insert(monkeypatch):
+    monkeypatch.setattr(tool_registry, "_resolve_symbol", lambda *args: {
+        "symbol": "XRP", "asset_type": "CRYPTO", "market": "KR",
+    })
+    monkeypatch.setattr(tool_registry, "get_user_id_from_header", lambda auth_header: ("user-1", "test"))
+    monkeypatch.setattr(tool_registry, "_post_internal", lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("지원하지 않는 주문유형은 사전검증 호출 금지")
+    ))
+    monkeypatch.setattr(tool_registry, "query_supabase", lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("지원하지 않는 주문유형 insert 금지")
+    ))
+
+    result = run_chatbot_tool("Bearer test", "XRP 10개 모의로 사줘")
+
+    assert result["data"]["reason"] == "unsupported_order_type"
+    assert "지정가" in result["reply"]
+    assert "800원에" in result["reply"]
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_env"),
+    [
+        ("XRP 10개 800원에 사줘", "MOCK"),
+        ("XRP 10개 800원에 실거래로 사줘", "REAL"),
+    ],
+)
+def test_order_environment_defaults_to_mock_and_keeps_explicit_real(monkeypatch, message, expected_env):
+    calls = []
+    monkeypatch.setattr(tool_registry, "_resolve_symbol", lambda *args: {
+        "symbol": "XRP", "asset_type": "CRYPTO", "market": "KR",
+    })
+    monkeypatch.setattr(
+        tool_registry,
+        "_run_chatbot_precheck",
+        lambda **kwargs: calls.append(kwargs) or _valid_precheck(),
+        raising=False,
+    )
+    monkeypatch.setattr(tool_registry, "get_user_id_from_header", lambda auth_header: ("user-1", "test"))
+    monkeypatch.setattr(
+        tool_registry,
+        "query_supabase",
+        lambda *args, **kwargs: [{"id": "proposal-env", "status": "PENDING"}],
+    )
+
+    result = run_chatbot_tool("Bearer test", message)
+
+    assert result["data"]["broker_env"] == expected_env
+    assert calls[0]["broker_env"] == expected_env

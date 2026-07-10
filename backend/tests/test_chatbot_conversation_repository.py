@@ -1,14 +1,32 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Barrier, Lock
 
+import pytest
+
+from backend.services import supabase_client
 from backend.services.chatbot.conversation_repository import ChatbotConversationRepository
 
 
 class FakeConversationStateBoundary:
-    def __init__(self, insert_conflict_once: bool = False):
+    def __init__(
+        self,
+        insert_conflict_once: bool = False,
+        insert_error: Exception | None = None,
+    ):
         self.rows = {}
         self.insert_conflict_once = insert_conflict_once
+        self.insert_error = insert_error
 
-    def query(self, auth_header, endpoint, method="GET", json_data=None, params=None):
+    def query(
+        self,
+        auth_header,
+        endpoint,
+        method="GET",
+        json_data=None,
+        params=None,
+        extra_headers=None,
+    ):
         assert endpoint == "chatbot_conversation_states"
         params = params or {}
         user_id = str(params.get("user_id") or "").removeprefix("eq.")
@@ -22,13 +40,171 @@ class FakeConversationStateBoundary:
             if self.insert_conflict_once:
                 self.insert_conflict_once = False
                 self.rows[user_id] = {"user_id": user_id}
-                raise RuntimeError("duplicate key value violates unique constraint")
+                raise RuntimeError("23505 duplicate key value violates unique constraint")
+            if self.insert_error:
+                raise self.insert_error
             self.rows[user_id] = payload
             return [dict(payload)]
         if method == "PATCH":
-            self.rows.setdefault(user_id, {"user_id": user_id}).update(json_data or {})
-            return [dict(self.rows[user_id])]
+            row = self.rows.get(user_id)
+            if not row:
+                return []
+            expected_action = params.get("pending_action")
+            expected_expires_at = params.get("pending_expires_at")
+            if expected_action and expected_action != f"eq.{row.get('pending_action')}":
+                return []
+            if expected_expires_at and expected_expires_at != f"eq.{row.get('pending_expires_at')}":
+                return []
+            row.update(json_data or {})
+            if (extra_headers or {}).get("Prefer") == "return=representation":
+                return [dict(row)]
+            return None
         raise AssertionError(f"지원하지 않는 메서드: {method}")
+
+
+class ConcurrentConsumeBoundary:
+    def __init__(self):
+        expires_at = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+        self.row = {
+            "user_id": "user-1",
+            "pending_action": "portfolio_summary",
+            "pending_payload": {"exchange": "TOSS"},
+            "pending_expires_at": expires_at,
+            "recommendation_items": [],
+            "recommendation_source": None,
+            "recommendation_expires_at": None,
+        }
+        self.read_barrier = Barrier(2)
+        self.lock = Lock()
+
+    def query(
+        self,
+        auth_header,
+        endpoint,
+        method="GET",
+        json_data=None,
+        params=None,
+        extra_headers=None,
+    ):
+        assert endpoint == "chatbot_conversation_states"
+        params = params or {}
+        if method == "GET":
+            with self.lock:
+                snapshot = dict(self.row)
+            self.read_barrier.wait(timeout=5)
+            return [snapshot]
+        if method == "PATCH":
+            with self.lock:
+                expected_action = params.get("pending_action")
+                expected_expires_at = params.get("pending_expires_at")
+                if expected_action and expected_action != f"eq.{self.row.get('pending_action')}":
+                    return []
+                if expected_expires_at and expected_expires_at != f"eq.{self.row.get('pending_expires_at')}":
+                    return []
+                self.row.update(json_data or {})
+                if (extra_headers or {}).get("Prefer") == "return=representation":
+                    return [dict(self.row)]
+                return None
+        raise AssertionError(f"지원하지 않는 메서드: {method}")
+
+
+class ReplacedPendingStateBoundary(FakeConversationStateBoundary):
+    def __init__(self):
+        super().__init__()
+        self.replaced = False
+
+    def query(
+        self,
+        auth_header,
+        endpoint,
+        method="GET",
+        json_data=None,
+        params=None,
+        extra_headers=None,
+    ):
+        if method == "PATCH" and not self.replaced:
+            self.replaced = True
+            self.rows["user-1"] = {
+                "user_id": "user-1",
+                "pending_action": "new_action",
+                "pending_payload": {"version": 2},
+                "pending_expires_at": (
+                    datetime.now(UTC) + timedelta(minutes=10)
+                ).isoformat(),
+            }
+        return super().query(
+            auth_header,
+            endpoint,
+            method,
+            json_data,
+            params,
+            extra_headers,
+        )
+
+
+class FakeChatHistoryBoundary:
+    def __init__(self, rows: list[dict]):
+        self.rows = rows
+
+    def query(self, auth_header, endpoint, method="GET", json_data=None, params=None):
+        assert endpoint == "chat_history"
+        params = params or {}
+        user_id = str(params.get("user_id") or "").removeprefix("eq.")
+        rows = [row for row in self.rows if row.get("user_id") == user_id]
+        if params.get("order") == "created_at.desc,id.desc":
+            rows.sort(
+                key=lambda row: (row.get("created_at") or "", row.get("id") or 0),
+                reverse=True,
+            )
+        limit = int(params.get("limit") or len(rows))
+        return rows[:limit]
+
+
+def test_query_supabase_merges_optional_response_headers(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = "[]"
+
+        @staticmethod
+        def json():
+            return []
+
+    def fake_patch(url, headers, json, params):
+        captured.update({
+            "url": url,
+            "headers": headers,
+            "json": json,
+            "params": params,
+        })
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        supabase_client,
+        "get_user_id_from_header",
+        lambda auth_header: ("user-1", "token-1"),
+    )
+    monkeypatch.setattr(supabase_client, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(supabase_client, "SUPABASE_ANON_KEY", "anon-key")
+    monkeypatch.setattr(supabase_client.requests, "patch", fake_patch)
+
+    result = supabase_client.query_supabase(
+        "Bearer test",
+        "chatbot_conversation_states",
+        "PATCH",
+        json_data={"pending_action": None},
+        params={"user_id": "eq.user-1"},
+        extra_headers={"Prefer": "return=representation"},
+    )
+
+    assert result == []
+    assert captured["headers"] == {
+        "apikey": "anon-key",
+        "Authorization": "Bearer token-1",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
 
 
 def test_load_recent_history_reads_supabase_on_every_request(monkeypatch):
@@ -56,6 +232,42 @@ def test_load_recent_history_reads_supabase_on_every_request(monkeypatch):
     ]
     assert second == first
     assert len(calls) == 2
+
+
+def test_load_recent_history_enforces_user_order_and_limit_contract(monkeypatch):
+    rows = [
+        {
+            "id": index,
+            "user_id": "user-1",
+            "role": "user",
+            "message": f"질문-{index}",
+            "created_at": "2026-07-10T01:00:00Z",
+        }
+        for index in range(1, 56)
+    ]
+    rows.append({
+        "id": 999,
+        "user_id": "user-2",
+        "role": "assistant",
+        "message": "다른 사용자 대화",
+        "created_at": "2026-07-10T02:00:00Z",
+    })
+    boundary = FakeChatHistoryBoundary(rows)
+    monkeypatch.setattr(
+        "backend.services.chatbot.conversation_repository.query_supabase",
+        boundary.query,
+    )
+
+    history = ChatbotConversationRepository().load_recent_history(
+        "Bearer test",
+        "user-1",
+        limit=100,
+    )
+
+    assert len(history) == 50
+    assert history[0] == {"role": "user", "content": "질문-6"}
+    assert history[-1] == {"role": "user", "content": "질문-55"}
+    assert all(item["content"] != "다른 사용자 대화" for item in history)
 
 
 def test_expired_recommendations_are_not_reused(monkeypatch):
@@ -173,6 +385,68 @@ def test_state_insert_race_recovers_by_patching_existing_row(monkeypatch):
     )
 
     assert repository.peek_pending_action("Bearer test", "user-1") == "portfolio_summary"
+
+
+def test_state_insert_non_unique_error_is_propagated(monkeypatch):
+    insert_error = RuntimeError("Supabase REST API 에러 (401): permission denied")
+    boundary = FakeConversationStateBoundary(insert_error=insert_error)
+    monkeypatch.setattr(
+        "backend.services.chatbot.conversation_repository.query_supabase",
+        boundary.query,
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        ChatbotConversationRepository().set_pending_action(
+            "Bearer test",
+            "user-1",
+            "portfolio_summary",
+        )
+
+    assert raised.value is insert_error
+    assert boundary.rows == {}
+
+
+def test_pending_action_is_claimed_by_exactly_one_concurrent_consumer(monkeypatch):
+    boundary = ConcurrentConsumeBoundary()
+    monkeypatch.setattr(
+        "backend.services.chatbot.conversation_repository.query_supabase",
+        boundary.query,
+    )
+    repositories = [ChatbotConversationRepository(), ChatbotConversationRepository()]
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(
+            lambda repository: repository.consume_pending_action(
+                "Bearer test",
+                "user-1",
+            ),
+            repositories,
+        ))
+
+    assert sum(action == "portfolio_summary" for action, _ in results) == 1
+    assert sum(result == (None, {}) for result in results) == 1
+
+
+def test_consume_does_not_clear_a_replaced_pending_action(monkeypatch):
+    boundary = ReplacedPendingStateBoundary()
+    boundary.rows["user-1"] = {
+        "user_id": "user-1",
+        "pending_action": "old_action",
+        "pending_payload": {"version": 1},
+        "pending_expires_at": (
+            datetime.now(UTC) + timedelta(minutes=5)
+        ).isoformat(),
+    }
+    monkeypatch.setattr(
+        "backend.services.chatbot.conversation_repository.query_supabase",
+        boundary.query,
+    )
+    repository = ChatbotConversationRepository()
+
+    result = repository.consume_pending_action("Bearer test", "user-1")
+
+    assert result == (None, {})
+    assert repository.peek_pending_action("Bearer test", "user-1") == "new_action"
 
 
 def test_recommendations_are_shared_across_repository_instances(monkeypatch):

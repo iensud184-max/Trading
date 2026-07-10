@@ -29,7 +29,15 @@ class FakeConversationSupabaseBoundary:
         self.history = []
         self.state = {}
 
-    def query(self, auth_header, endpoint, method="GET", json_data=None, params=None):
+    def query(
+        self,
+        auth_header,
+        endpoint,
+        method="GET",
+        json_data=None,
+        params=None,
+        extra_headers=None,
+    ):
         params = params or {}
         user_id = str(params.get("user_id") or "").removeprefix("eq.")
         if endpoint == "chat_history":
@@ -52,8 +60,19 @@ class FakeConversationSupabaseBoundary:
                 self.state[payload["user_id"]] = payload
                 return [dict(payload)]
             if method == "PATCH":
-                self.state.setdefault(user_id, {"user_id": user_id}).update(json_data or {})
-                return [dict(self.state[user_id])]
+                row = self.state.get(user_id)
+                if not row:
+                    return []
+                expected_action = params.get("pending_action")
+                expected_expires_at = params.get("pending_expires_at")
+                if expected_action and expected_action != f"eq.{row.get('pending_action')}":
+                    return []
+                if expected_expires_at and expected_expires_at != f"eq.{row.get('pending_expires_at')}":
+                    return []
+                row.update(json_data or {})
+                if (extra_headers or {}).get("Prefer") == "return=representation":
+                    return [dict(row)]
+                return None
         raise AssertionError(f"지원하지 않는 Supabase 요청: {endpoint} {method}")
 
 

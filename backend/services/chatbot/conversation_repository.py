@@ -74,13 +74,14 @@ class ChatbotConversationRepository:
     ) -> tuple[str | None, dict]:
         state = self._load_state(auth_header, user_id)
         action = str(state.get("pending_action") or "").strip()
-        expires_at = self._parse_datetime(state.get("pending_expires_at"))
+        raw_expires_at = state.get("pending_expires_at")
+        expires_at = self._parse_datetime(raw_expires_at)
         if not action or not self._is_unexpired(expires_at, now):
             return None, {}
 
         payload = state.get("pending_payload")
         normalized_payload = payload if isinstance(payload, dict) else {}
-        query_supabase(
+        claimed_rows = query_supabase(
             auth_header,
             "chatbot_conversation_states",
             "PATCH",
@@ -89,8 +90,15 @@ class ChatbotConversationRepository:
                 "pending_payload": {},
                 "pending_expires_at": None,
             },
-            params={"user_id": f"eq.{user_id}"},
-        )
+            params={
+                "user_id": f"eq.{user_id}",
+                "pending_action": f"eq.{action}",
+                "pending_expires_at": f"eq.{raw_expires_at}",
+            },
+            extra_headers={"Prefer": "return=representation"},
+        ) or []
+        if not claimed_rows:
+            return None, {}
         return action, normalized_payload
 
     def peek_pending_action(
@@ -183,8 +191,17 @@ class ChatbotConversationRepository:
                 "POST",
                 json_data={"user_id": user_id, **updates},
             )
-        except Exception:
+        except Exception as error:
+            if not self._is_unique_violation(error):
+                raise
             self._patch_state(auth_header, user_id, updates)
+
+    @staticmethod
+    def _is_unique_violation(error: Exception) -> bool:
+        message = str(error).lower()
+        return "23505" in message or (
+            "duplicate key" in message and "unique" in message
+        )
 
     @staticmethod
     def _patch_state(

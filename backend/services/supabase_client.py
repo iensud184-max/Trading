@@ -13,7 +13,14 @@ load_dotenv(PROJECT_ROOT / "backend" / ".env")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 
-def query_supabase(auth_header: str, endpoint: str, method: str = "GET", json_data: dict = None, params: dict = None) -> any:
+def query_supabase(
+    auth_header: str,
+    endpoint: str,
+    method: str = "GET",
+    json_data: dict = None,
+    params: dict = None,
+    extra_headers: dict = None,
+) -> any:
     """
     사용자의 JWT 토큰을 릴레이하여 Supabase REST API를 직접 호출합니다.
     """
@@ -40,6 +47,8 @@ def query_supabase(auth_header: str, endpoint: str, method: str = "GET", json_da
         "Authorization": f"Bearer {supabase_key}" if use_service_role else f"Bearer {token}",
         "Content-Type": "application/json"
     }
+    if extra_headers:
+        headers.update(extra_headers)
     
     if method == "GET":
         res = requests.get(url, headers=headers, params=params)
@@ -312,4 +321,3 @@ def safe_query_supabase_as_service_role(endpoint: str, method: str = "GET", json
         return query_supabase_as_service_role(endpoint, method=method, json_data=json_data, params=params)
     except Exception:
         return None
-

@@ -1,3 +1,5 @@
+from flask import current_app
+
 from backend.app import app
 from backend.services.auth_service import validate_access_token
 
@@ -51,7 +53,7 @@ def test_chatbot_stream_route_emits_trace_delta_and_done_events(monkeypatch):
     )
     monkeypatch.setattr(
         "backend.routes.chatbot.chatbot_service.reply",
-        lambda message, user_id=None, auth_header=None, user_timezone=None, trace_callback=None: {
+        lambda message, user_id=None, auth_header=None, user_timezone=None, trace_callback=None, delta_callback=None: {
             "reply": "추천 후보입니다.",
             "actions": [],
             "meta": {
@@ -80,6 +82,40 @@ def test_chatbot_stream_route_emits_trace_delta_and_done_events(monkeypatch):
     assert '"text": "추천 후보입니다."' in body
     assert "event: done" in body
     assert '"source": "PROJECT_TOOL"' in body
+    assert '"request_id"' in body
+
+
+def test_chatbot_stream_forwards_live_deltas_without_rechunking(monkeypatch):
+    monkeypatch.setattr(
+        "backend.routes.chatbot.validate_access_token",
+        lambda auth_header: ("user-1", "token"),
+    )
+
+    def fake_reply(
+        message,
+        user_id=None,
+        auth_header=None,
+        user_timezone=None,
+        trace_callback=None,
+        delta_callback=None,
+    ):
+        delta_callback("첫 ")
+        delta_callback("답변")
+        return {"reply": "첫 답변", "actions": [], "meta": {"source": "OPENAI"}}
+
+    monkeypatch.setattr("backend.routes.chatbot.chatbot_service.reply", fake_reply)
+    response = app.test_client().post(
+        "/api/chatbot/stream",
+        headers={"Authorization": "Bearer valid"},
+        json={"message": "질문"},
+    )
+    body = response.get_data(as_text=True)
+
+    assert body.count("event: delta") == 2
+    assert '"text": "첫 "' in body
+    assert '"text": "답변"' in body
+    assert body.index("event: trace") < body.index("event: delta") < body.index("event: done")
+    assert '"request_id"' in body
 
 
 def test_chatbot_stream_route_emits_live_trace_callback_events(monkeypatch):
@@ -88,7 +124,14 @@ def test_chatbot_stream_route_emits_live_trace_callback_events(monkeypatch):
         lambda auth_header: ("user-1", "token"),
     )
 
-    def fake_reply(message, user_id=None, auth_header=None, user_timezone=None, trace_callback=None):
+    def fake_reply(
+        message,
+        user_id=None,
+        auth_header=None,
+        user_timezone=None,
+        trace_callback=None,
+        delta_callback=None,
+    ):
         trace_callback({"kind": "tool_routing", "label": "도구 확인"})
         trace_callback({"kind": "ml", "label": "ML 신호 조회 중"})
         return {
@@ -114,6 +157,77 @@ def test_chatbot_stream_route_emits_live_trace_callback_events(monkeypatch):
 
     assert body.index('"label": "도구 확인"') < body.index('"text": "추천 후보입니다."')
     assert '"label": "ML 신호 조회 중"' in body
+
+
+def test_chatbot_stream_worker_has_app_context_and_logs_request_id(monkeypatch):
+    monkeypatch.setattr(
+        "backend.routes.chatbot.validate_access_token",
+        lambda auth_header: ("user-1", "token"),
+    )
+    logged = []
+
+    def fake_reply(
+        message,
+        user_id=None,
+        auth_header=None,
+        user_timezone=None,
+        trace_callback=None,
+        delta_callback=None,
+    ):
+        assert current_app.name == app.name
+        raise RuntimeError("stream failed")
+
+    monkeypatch.setattr("backend.routes.chatbot.chatbot_service.reply", fake_reply)
+    monkeypatch.setattr(
+        app.logger,
+        "exception",
+        lambda message, *args: logged.append((message, args)),
+    )
+
+    response = app.test_client().post(
+        "/api/chatbot/stream",
+        headers={"Authorization": "Bearer valid"},
+        json={"message": "질문"},
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "event: error" in body
+    assert '"request_id"' in body
+    assert len(logged) == 1
+    assert logged[0][0] == "챗봇 스트림 생성 실패: request_id=%s user_id=%s"
+    assert logged[0][1][1] == "user-1"
+
+
+def test_chatbot_stream_partial_delta_ends_with_error_not_done(monkeypatch):
+    monkeypatch.setattr(
+        "backend.routes.chatbot.validate_access_token",
+        lambda auth_header: ("user-1", "token"),
+    )
+
+    def fake_reply(
+        message,
+        user_id=None,
+        auth_header=None,
+        user_timezone=None,
+        trace_callback=None,
+        delta_callback=None,
+    ):
+        delta_callback("부분 답변")
+        raise RuntimeError("stream failed")
+
+    monkeypatch.setattr("backend.routes.chatbot.chatbot_service.reply", fake_reply)
+    response = app.test_client().post(
+        "/api/chatbot/stream",
+        headers={"Authorization": "Bearer valid"},
+        json={"message": "질문"},
+    )
+    body = response.get_data(as_text=True)
+
+    assert '"text": "부분 답변"' in body
+    assert "event: error" in body
+    assert "event: done" not in body
+    assert '"request_id"' in body
 
 
 def test_validate_access_token_matches_supabase_user(monkeypatch):

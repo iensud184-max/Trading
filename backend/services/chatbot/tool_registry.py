@@ -2,7 +2,8 @@ import json
 import math
 import os
 import re
-from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlencode
@@ -10,17 +11,23 @@ from urllib.parse import urlencode
 import requests
 
 from backend.services.auth_service import get_user_id_from_header
+from backend.services.chatbot.conversation_repository import ChatbotConversationRepository
 from backend.services.supabase_client import query_supabase, safe_query_supabase
 from backend.services.symbol_metadata import enrich_symbol
 from backend.services.chatbot.web_fallback_search_service import ChatbotWebFallbackSearchService
 from backend.services.chatbot.safety_guard import enforce_tool_safety
 from backend.services.chatbot.order_parser import ParsedOrderIntent, parse_order_intent
+from backend.services.chatbot.portfolio_summary_service import (
+    build_portfolio_totals,
+    format_portfolio_reply,
+    normalize_account_summary,
+)
 from backend.services.chatbot.recommendation_service import ChatbotRecommendationService
 
 
 API_BASE_URL = os.getenv("CHATBOT_INTERNAL_API_BASE_URL", "http://localhost:5050")
 OPEN_ORDER_STATUSES = ("PENDING", "APPROVED", "ORDERED", "OPEN", "PARTIALLY_FILLED", "MODIFIED")
-_last_recommendations_by_user: dict[str, dict] = {}
+_conversation_repository = ChatbotConversationRepository()
 
 SYMBOL_QUERY_ALIASES = {
     "삼전": "삼성전자",
@@ -223,6 +230,12 @@ def _detect_exchange(text: str) -> str | None:
     return None
 
 
+def _default_exchange_for_asset(asset_type: str, market: str) -> str:
+    if str(asset_type or "").upper() == "CRYPTO":
+        return "COINONE"
+    return "TOSS"
+
+
 def _detect_env(text: str) -> str | None:
     if "모의" in text or "MOCK" in text.upper():
         return "MOCK"
@@ -395,33 +408,20 @@ def get_portfolio_summary(auth_header: str, message: str) -> dict:
             try:
                 payload = _post_internal("/api/dashboard/balance", auth_header, {"exchange": exchange, "env": env})
                 balance = payload.get("data") or {}
-                summaries.append({
-                    "exchange": exchange,
-                    "env": env,
-                    "total_evaluation": _to_float(balance.get("total_evaluation") or balance.get("total_asset") or balance.get("total_balance")),
-                    "available_cash": _to_float(balance.get("available_cash") or balance.get("cash") or balance.get("krw_balance")),
-                    "exchange_rate": balance.get("exchange_rate"),
-                    "holdings": balance.get("holdings") or [],
-                })
-            except Exception as exc:
-                errors.append(f"{exchange} {env}: {str(exc)[:80]}")
+                summaries.append(normalize_account_summary(exchange, env, balance))
+            except Exception:
+                errors.append(f"{exchange} {env} 계좌 조회 실패")
 
-    total_eval = sum(item["total_evaluation"] for item in summaries)
-    total_cash = sum(item["available_cash"] for item in summaries)
-    lines = [
-        f"평가 자산 합계: {_format_money(total_eval)}",
-        f"추정 현금/주문가능금액 합계: {_format_money(total_cash)}",
-    ]
-    for item in summaries:
-        lines.append(
-            f"- {item['exchange']} {item['env']}: 평가 {_format_money(item['total_evaluation'])}, 현금 {_format_money(item['available_cash'])}"
-        )
-    if errors and not summaries:
-        lines.append("조회 가능한 계좌가 없습니다. 설정의 API 키와 거래소 계정 상태를 확인해 주세요.")
+    totals_by_env = build_portfolio_totals(summaries)
 
     return {
-        "reply": "\n".join(lines),
-        "data": {"summaries": summaries, "errors": errors[:5]},
+        "reply": format_portfolio_reply(totals_by_env, summaries, errors),
+        "data": {
+            "summaries": summaries,
+            "totals_by_env": totals_by_env,
+            "errors": errors[:5],
+            "source": "PORTFOLIO_SUMMARY",
+        },
     }
 
 
@@ -626,6 +626,25 @@ def get_holdings(auth_header: str, message: str) -> dict:
     }
 
 
+def _collect_precheck_blockers(precheck: dict, broker_env: str) -> list[str]:
+    blockers = []
+    if precheck.get("balance_check_failed"):
+        blockers.append("주문에 필요한 잔고 또는 보유수량을 확인하지 못했습니다.")
+    if precheck.get("is_market_closed"):
+        blockers.append(precheck.get("market_status_message") or "현재 거래 가능 시간이 아닙니다.")
+    if precheck.get("insufficient_cash"):
+        blockers.append("주문 가능 현금이 부족합니다.")
+    if precheck.get("insufficient_holding"):
+        blockers.append("보유 수량보다 많은 매도 주문입니다.")
+    if precheck.get("insufficient_permission"):
+        blockers.append(precheck.get("permission_message") or "거래 권한이 없습니다.")
+    if precheck.get("futures_real_blocked"):
+        blockers.append("바이낸스 선물 실거래가 잠겨 있습니다.")
+    if broker_env == "REAL" and precheck.get("exceeds_real_order_limit"):
+        blockers.append("실거래 1회 주문 한도 100,000원을 초과했습니다.")
+    return blockers
+
+
 def create_trade_proposal(auth_header: str, arguments: dict) -> dict:
     """사용자 승인 전 상태인 PENDING 매매 제안만 생성합니다."""
     enforce_tool_safety("create_trade_proposal", arguments)
@@ -648,6 +667,8 @@ def create_trade_proposal(auth_header: str, arguments: dict) -> dict:
         raise ValueError("매매 제안 방향은 BUY 또는 SELL이어야 합니다.")
     if order_type not in {"LIMIT", "MARKET"}:
         raise ValueError("주문 유형은 LIMIT 또는 MARKET이어야 합니다.")
+    if exchange == "COINONE" and order_type == "MARKET":
+        raise ValueError("코인원 매매 제안은 지정가 주문만 지원합니다.")
     if broker_env not in {"MOCK", "REAL"}:
         raise ValueError("broker_env는 MOCK 또는 REAL이어야 합니다.")
 
@@ -655,7 +676,7 @@ def create_trade_proposal(auth_header: str, arguments: dict) -> dict:
         quantity = float(values.get("quantity") or values.get("volume"))
     except (TypeError, ValueError) as error:
         raise ValueError("매매 제안 수량이 올바르지 않습니다.") from error
-    if quantity <= 0:
+    if not math.isfinite(quantity) or quantity <= 0:
         raise ValueError("매매 제안 수량은 0보다 커야 합니다.")
 
     price_value = values.get("price")
@@ -663,8 +684,38 @@ def create_trade_proposal(auth_header: str, arguments: dict) -> dict:
         price = float(price_value) if price_value not in (None, "") else None
     except (TypeError, ValueError) as error:
         raise ValueError("매매 제안 가격이 올바르지 않습니다.") from error
+    if price is not None and not math.isfinite(price):
+        raise ValueError("매매 제안 가격은 유한한 숫자여야 합니다.")
     if order_type == "LIMIT" and (price is None or price <= 0):
         raise ValueError("지정가 매매 제안에는 0보다 큰 가격이 필요합니다.")
+
+    raw_order_payload = values.get("raw_order_payload") or {}
+    if not isinstance(raw_order_payload, dict):
+        raw_order_payload = {}
+    precheck = raw_order_payload.get("precheck") or {}
+    if not isinstance(precheck, dict):
+        precheck = {}
+    try:
+        reference_price = float(precheck.get("reference_price"))
+        estimated_amount_krw = float(precheck.get("estimated_amount_krw"))
+    except (TypeError, ValueError):
+        reference_price = 0.0
+        estimated_amount_krw = 0.0
+    if (
+        raw_order_payload.get("precheck_status") != "OK"
+        or not precheck
+        or not math.isfinite(reference_price)
+        or reference_price <= 0
+        or not math.isfinite(estimated_amount_krw)
+        or estimated_amount_krw <= 0
+    ):
+        raise ValueError("주문 사전검증을 통과한 제안만 생성할 수 있습니다.")
+    blockers = _collect_precheck_blockers(precheck, broker_env)
+    relevant_balance = precheck.get("available_cash") if side == "BUY" else precheck.get("holding_qty")
+    if relevant_balance is None:
+        blockers.append("주문에 필요한 잔고 또는 보유수량을 확인하지 못했습니다.")
+    if blockers:
+        raise ValueError(" ".join(blockers))
 
     market_country = str(values.get("market_country") or ("US" if exchange == "TOSS" and asset_type == "STOCK" else "KR")).upper()
     currency = str(values.get("currency") or ("USD" if market_country == "US" or exchange in {"BINANCE", "BINANCE_UM_FUTURES"} else "KRW")).upper()
@@ -683,10 +734,8 @@ def create_trade_proposal(auth_header: str, arguments: dict) -> dict:
         "market_country": market_country,
         "currency": currency,
         "status": "PENDING",
+        "raw_order_payload": raw_order_payload,
     }
-    raw_order_payload = values.get("raw_order_payload")
-    if isinstance(raw_order_payload, dict) and raw_order_payload:
-        payload["raw_order_payload"] = raw_order_payload
     created = query_supabase(auth_header, "trade_proposals", "POST", json_data=payload)
     record = (created[0] if isinstance(created, list) and created else created) or payload
     return {
@@ -709,11 +758,26 @@ def create_trade_proposal_from_message(auth_header: str, message: str, intent: P
     market = str(symbol_data.get("market") or "").upper()
     exchange = _detect_exchange(message)
     if not exchange:
-        exchange = "COINONE" if asset_type == "CRYPTO" else ("TOSS" if market == "US" else "KIS")
+        exchange = _default_exchange_for_asset(asset_type, market)
+    broker_env = parsed.broker_env or "MOCK"
+
+    if exchange == "COINONE" and parsed.order_type == "MARKET":
+        return {
+            "reply": (
+                "코인원 챗봇 매매 제안은 현재 지정가만 지원합니다. "
+                "예: 'XRP 10개 800원에 모의로 사줘'처럼 가격을 함께 입력해 주세요."
+            ),
+            "data": {
+                "source": "CHATBOT_ORDER_PARSER",
+                "reason": "unsupported_order_type",
+                "exchange": exchange,
+                "symbol": symbol,
+            },
+        }
 
     price = parsed.price
     if price is None and (parsed.amount_krw or parsed.sell_ratio):
-        price = _lookup_current_price(auth_header, exchange, symbol, parsed.broker_env or _detect_env(message) or "MOCK")
+        price = _lookup_current_price(auth_header, exchange, symbol, broker_env)
 
     quantity = parsed.quantity
     if quantity is None and parsed.amount_krw:
@@ -731,7 +795,7 @@ def create_trade_proposal_from_message(auth_header: str, message: str, intent: P
                 },
             }
     if quantity is None and parsed.sell_ratio:
-        holding_qty = _lookup_holding_quantity(auth_header, message, symbol, exchange, parsed.broker_env or _detect_env(message))
+        holding_qty = _lookup_holding_quantity(auth_header, message, symbol, exchange, broker_env)
         quantity = _quantity_from_ratio(holding_qty, parsed.sell_ratio, asset_type)
         if quantity <= 0:
             return {
@@ -778,21 +842,76 @@ def create_trade_proposal_from_message(auth_header: str, message: str, intent: P
             "reply": f"{symbol} {parsed.side} 매매 제안을 만들 수량을 알려주세요.",
             "data": {"source": "CHATBOT_ORDER_PARSER", "reason": "missing_quantity", "symbol": symbol},
         }
+    quantity = _normalize_order_quantity(quantity, asset_type)
+    if quantity <= 0:
+        return {
+            "reply": f"{symbol} 매매 제안을 만들 수량이 최소 주문 단위보다 작습니다. 수량을 늘려 다시 입력해 주세요.",
+            "data": {
+                "source": "CHATBOT_ORDER_PARSER",
+                "reason": "quantity_too_small_after_normalization",
+                "symbol": symbol,
+                "side": parsed.side,
+            },
+        }
 
     market_country = "KR" if asset_type == "CRYPTO" else (market or "KR")
     currency = "KRW" if asset_type == "CRYPTO" or market_country != "US" else "USD"
-    broker_env = parsed.broker_env or _detect_env(message) or "MOCK"
     order_type = "LIMIT" if price and price > 0 else parsed.order_type
-    precheck_payload = _build_chatbot_precheck_payload(
-        auth_header=auth_header,
-        exchange=exchange,
-        symbol=symbol,
-        side=parsed.side,
-        order_type=order_type,
-        quantity=quantity,
-        price=price,
-        broker_env=broker_env,
-    )
+    try:
+        precheck = _run_chatbot_precheck(
+            auth_header=auth_header,
+            exchange=exchange,
+            symbol=symbol,
+            side=parsed.side,
+            order_type=order_type,
+            quantity=quantity,
+            price=price,
+            broker_env=broker_env,
+        )
+    except Exception as error:
+        error_text = str(error)
+        if "API 키" in error_text or "API키" in error_text:
+            action = "거래소 API 키가 없거나 권한이 부족할 수 있습니다. API 키 등록과 계좌 환경을 확인한 뒤 다시 시도해 주세요."
+        elif "현재가" in error_text or "주문금액" in error_text:
+            action = "현재가와 예상 주문금액을 확인하지 못했습니다. 시세 연결 상태를 확인한 뒤 다시 시도해 주세요."
+        else:
+            action = "시세, 잔고, 거래 가능 시간, API 연결 상태를 확인한 뒤 다시 시도해 주세요."
+        return {
+            "reply": f"매매 제안 사전검증을 완료하지 못했습니다. {action}",
+            "data": {
+                "source": "CHATBOT_ORDER_PARSER",
+                "reason": "precheck_failed",
+                "exchange": exchange,
+                "symbol": symbol,
+            },
+        }
+
+    blockers = _collect_precheck_blockers(precheck, broker_env)
+    if blockers:
+        return {
+            "reply": f"매매 제안을 만들 수 없습니다. {' '.join(blockers)} 조건을 확인한 뒤 다시 시도해 주세요.",
+            "data": {
+                "source": "CHATBOT_ORDER_PARSER",
+                "reason": "precheck_failed",
+                "exchange": exchange,
+                "symbol": symbol,
+                "blockers": blockers,
+            },
+        }
+    normalized_quantity = _to_float(precheck.get("quantity"))
+    if normalized_quantity > 0:
+        quantity = normalized_quantity
+    if quantity <= 0:
+        return {
+            "reply": f"{symbol} 매매 제안을 만들 수량이 거래소 주문 단위보다 작습니다. 수량을 늘려 다시 입력해 주세요.",
+            "data": {
+                "source": "CHATBOT_ORDER_PARSER",
+                "reason": "quantity_too_small_after_precheck",
+                "exchange": exchange,
+                "symbol": symbol,
+                "side": parsed.side,
+            },
+        }
 
     return create_trade_proposal(
         auth_header,
@@ -807,25 +926,35 @@ def create_trade_proposal_from_message(auth_header: str, message: str, intent: P
             "broker_env": broker_env,
             "market_country": market_country,
             "currency": currency,
-            "raw_order_payload": precheck_payload,
+            "raw_order_payload": {
+                "precheck_status": "OK",
+                "precheck": precheck,
+                "source": "CHATBOT_ORDER_PARSER",
+            },
         },
     )
 
 
 def _store_last_recommendations(auth_header: str, result: dict) -> None:
     data = result.get("data") or {}
-    items = data.get("items") or []
+    items = [
+        item
+        for item in (data.get("items") or [])
+        if isinstance(item, dict) and item.get("symbol")
+    ][:10]
     if not items:
         return
     try:
         user_id, _ = get_user_id_from_header(auth_header)
     except Exception:
         return
-    _last_recommendations_by_user[user_id] = {
-        "items": [item for item in items if isinstance(item, dict) and item.get("symbol")],
-        "stored_at": datetime.now(UTC).isoformat(),
-        "source": data.get("source"),
-    }
+    _conversation_repository.store_recommendations(
+        auth_header,
+        user_id,
+        items,
+        data.get("source"),
+        ttl_seconds=600,
+    )
 
 
 def _extract_recommendation_reference_index(text: str) -> int | None:
@@ -864,8 +993,10 @@ def _with_referenced_recommendation_symbol(auth_header: str, message: str) -> tu
         return None, None
 
     user_id, _ = get_user_id_from_header(auth_header)
-    recent = _last_recommendations_by_user.get(user_id) or {}
-    items = recent.get("items") or []
+    items = _conversation_repository.load_recommendations(
+        auth_header,
+        user_id,
+    )
     if not items:
         return None, {
             "reply": "추천 후보를 먼저 조회한 뒤, 예: '1번으로 10만원어치 매수 제안'처럼 말해 주세요.",
@@ -911,7 +1042,7 @@ def create_trade_proposal_from_recommendation_reference(auth_header: str, messag
     return create_trade_proposal_from_message(auth_header, rewritten_message, parsed)
 
 
-def _build_chatbot_precheck_payload(
+def _run_chatbot_precheck(
     auth_header: str,
     exchange: str,
     symbol: str,
@@ -921,30 +1052,37 @@ def _build_chatbot_precheck_payload(
     price: float | None,
     broker_env: str,
 ) -> dict:
+    response = _post_internal(
+        "/api/trade/precheck",
+        auth_header,
+        {
+            "exchange": exchange,
+            "symbol": symbol,
+            "action": side,
+            "order_type": order_type,
+            "quantity": quantity,
+            "price": price,
+            "broker_env": broker_env,
+        },
+    )
+    precheck = response.get("data") or {}
     try:
-        response = _post_internal(
-            "/api/trade/precheck",
-            auth_header,
-            {
-                "exchange": exchange,
-                "symbol": symbol,
-                "action": side,
-                "order_type": order_type,
-                "quantity": quantity,
-                "price": price,
-                "broker_env": broker_env,
-            },
-        )
-        data = response.get("data") or {}
-        return {
-            "precheck": data,
-            "precheck_status": "OK",
-        }
-    except Exception as error:
-        return {
-            "precheck_status": "FAILED",
-            "precheck_error": str(error)[:200],
-        }
+        reference_price = float(precheck.get("reference_price"))
+        estimated_amount_krw = float(precheck.get("estimated_amount_krw"))
+    except (TypeError, ValueError):
+        reference_price = 0.0
+        estimated_amount_krw = 0.0
+    if (
+        not math.isfinite(reference_price)
+        or reference_price <= 0
+        or not math.isfinite(estimated_amount_krw)
+        or estimated_amount_krw <= 0
+    ):
+        raise ValueError("현재가와 예상 주문금액을 확인하지 못했습니다.")
+    relevant_balance = precheck.get("available_cash") if side == "BUY" else precheck.get("holding_qty")
+    if precheck.get("balance_check_failed") or relevant_balance is None:
+        raise ValueError("주문에 필요한 잔고 또는 보유수량을 확인하지 못했습니다.")
+    return precheck
 
 
 def _lookup_current_price(auth_header: str, exchange: str, symbol: str, broker_env: str) -> float | None:
@@ -971,9 +1109,25 @@ def _quantity_from_amount(amount: float, price: float | None, asset_type: str) -
     if not price or price <= 0:
         return 0.0
     raw_quantity = amount / price
+    return _normalize_order_quantity(raw_quantity, asset_type)
+
+
+def _normalize_order_quantity(quantity: float, asset_type: str) -> float:
+    if not math.isfinite(float(quantity)) or float(quantity) <= 0:
+        return 0.0
     if asset_type == "STOCK":
-        return float(math.floor(raw_quantity))
-    return float(f"{raw_quantity:.8f}")
+        return float(math.floor(float(quantity)))
+    return _floor_quantity(quantity, 8)
+
+
+def _floor_quantity(quantity: float, precision: int) -> float:
+    try:
+        decimal_quantity = Decimal(str(quantity))
+    except (InvalidOperation, ValueError):
+        return 0.0
+    step = Decimal("1").scaleb(-precision)
+    floored = decimal_quantity.quantize(step, rounding=ROUND_DOWN)
+    return float(floored)
 
 
 def _lookup_holding_quantity(
@@ -1005,9 +1159,7 @@ def _lookup_holding_quantity(
 
 def _quantity_from_ratio(holding_quantity: float, ratio: float, asset_type: str) -> float:
     raw_quantity = max(holding_quantity, 0) * min(max(ratio, 0), 1)
-    if asset_type == "STOCK":
-        return float(math.floor(raw_quantity))
-    return float(f"{raw_quantity:.8f}")
+    return _normalize_order_quantity(raw_quantity, asset_type)
 
 
 def _match_min_amount(text: str) -> float:
@@ -1374,6 +1526,12 @@ def run_chatbot_tool(auth_header: str | None, message: str) -> dict | None:
         return guarded("get_asset_outlook", get_recommendation_candidates)
     if _is_asset_outlook_request(text):
         return guarded("get_asset_outlook", get_asset_outlook)
+    is_portfolio_summary_request = (
+        "요약" in text
+        and any(keyword in text for keyword in ["보유", "자산", "포트폴리오", "계좌"])
+    )
+    if is_portfolio_summary_request:
+        return guarded("get_portfolio_summary", get_portfolio_summary)
     if not is_strategy_request and any(keyword in text for keyword in ["보유", "내 주식", "뭐뭐 있어", "들고"]):
         return guarded("get_holdings", get_holdings)
     if (not is_strategy_request or is_direct_read_request) and any(keyword in text for keyword in ["평가 자산", "평가자산", "내 돈", "얼마 있어", "자산 얼마"]):

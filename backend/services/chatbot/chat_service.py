@@ -1,9 +1,12 @@
 import json
-from collections import defaultdict, deque
+import logging
 from datetime import datetime
 from typing import Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from flask import current_app, has_app_context
+
+from backend.services.chatbot.conversation_repository import ChatbotConversationRepository
 from backend.services.chatbot.function_calling import FUNCTION_SCHEMAS
 from backend.services.chatbot.llm_client import ChatbotLLMClient
 from backend.services.chatbot.memory_service import ChatbotMemoryService
@@ -11,7 +14,6 @@ from backend.services.chatbot.prompt_registry import build_system_prompt
 from backend.services.chatbot.rag_service import ChatbotRAGService
 from backend.services.chatbot.tool_registry import (
     add_watchlist_item,
-    create_trade_proposal,
     get_exchange_rate,
     get_holdings,
     get_home_market_rankings,
@@ -56,6 +58,7 @@ PENDING_ACTION_TTL_SECONDS = 300
 CHAT_HISTORY_MAXLEN = 12
 DEFAULT_CHATBOT_TIMEZONE = "Asia/Seoul"
 TraceCallback = Callable[[dict], None]
+logger = logging.getLogger(__name__)
 
 
 def build_tool_trace_steps(tool_result_data: dict | None) -> list[dict]:
@@ -160,52 +163,31 @@ class ChatbotService:
         self.rag_service = ChatbotRAGService()
         self.knowledge_repository = KnowledgeRepository()
         self.memory_service = ChatbotMemoryService(self.knowledge_repository)
-        self._history_by_user = defaultdict(lambda: deque(maxlen=CHAT_HISTORY_MAXLEN))
-        self._history_loaded_users = set()
-        self._pending_actions = {}
+        self.conversation_repository = ChatbotConversationRepository()
 
-    def _conversation_key(self, user_id: str | None) -> str | None:
-        return user_id
+    @staticmethod
+    def _log_repository_failure(message: str) -> None:
+        if has_app_context():
+            current_app.logger.exception(message)
+            return
+        logger.exception(message)
 
-    def _get_recent_history(self, user_id: str | None) -> list[dict]:
-        if not user_id:
+    def _load_recent_history(
+        self,
+        auth_header: str | None,
+        user_id: str | None,
+    ) -> list[dict]:
+        if not auth_header or not user_id:
             return []
-        return list(self._history_by_user[self._conversation_key(user_id)])
-
-    def _append_history(self, user_id: str | None, role: str, content: str) -> None:
-        if not user_id:
-            return
-        text = str(content or "").strip()
-        if not text:
-            return
-        self._history_by_user[self._conversation_key(user_id)].append({
-            "role": role,
-            "content": text,
-        })
-
-    def _load_persisted_history(self, auth_header: str | None, user_id: str | None) -> None:
-        if not auth_header or not user_id or user_id in self._history_loaded_users:
-            return
-
-        rows = safe_query_supabase(
-            auth_header,
-            "chat_history",
-            "GET",
-            params={
-                "user_id": f"eq.{user_id}",
-                "select": "role,message,created_at,id",
-                "order": "created_at.desc,id.desc",
-                "limit": str(CHAT_HISTORY_MAXLEN),
-            },
-        ) or []
-        history = self._history_by_user[self._conversation_key(user_id)]
-        history.clear()
-        for row in reversed(rows):
-            role = str((row or {}).get("role") or "").strip()
-            message = str((row or {}).get("message") or "").strip()
-            if role in {"user", "assistant"} and message:
-                history.append({"role": role, "content": message})
-        self._history_loaded_users.add(user_id)
+        try:
+            return self.conversation_repository.load_recent_history(
+                auth_header,
+                user_id,
+                CHAT_HISTORY_MAXLEN,
+            )
+        except Exception:
+            self._log_repository_failure("챗봇 대화 이력 조회에 실패했습니다.")
+            return []
 
     def _record_exchange(
         self,
@@ -217,17 +199,16 @@ class ChatbotService:
         if not user_id:
             return
 
-        self._append_history(user_id, "user", user_message)
-        self._append_history(user_id, "assistant", assistant_message)
-        safe_query_supabase(
-            auth_header,
-            "chat_history",
-            "POST",
-            json_data=[
-                {"user_id": user_id, "role": "user", "message": str(user_message).strip()},
-                {"user_id": user_id, "role": "assistant", "message": str(assistant_message).strip()},
-            ],
-        )
+        if auth_header:
+            try:
+                self.conversation_repository.record_exchange(
+                    auth_header,
+                    user_id,
+                    user_message,
+                    assistant_message,
+                )
+            except Exception:
+                self._log_repository_failure("챗봇 대화 저장에 실패했습니다.")
         try:
             self.memory_service.capture_from_exchange(
                 auth_header=auth_header,
@@ -238,44 +219,55 @@ class ChatbotService:
         except Exception:
             pass
 
-    def _set_pending_action(self, user_id: str | None, action: str) -> None:
-        if not user_id:
+    def _set_pending_action(
+        self,
+        auth_header: str | None,
+        user_id: str | None,
+        action: str,
+    ) -> None:
+        if not auth_header or not user_id:
             return
-        import time
+        try:
+            self.conversation_repository.set_pending_action(
+                auth_header,
+                user_id,
+                action,
+                ttl_seconds=PENDING_ACTION_TTL_SECONDS,
+            )
+        except Exception:
+            self._log_repository_failure("챗봇 대기 작업 저장에 실패했습니다.")
 
-        self._pending_actions[self._conversation_key(user_id)] = {
-            "action": action,
-            "expires_at": time.time() + PENDING_ACTION_TTL_SECONDS,
-        }
+    def _consume_pending_action(
+        self,
+        auth_header: str | None,
+        user_id: str | None,
+    ) -> tuple[str | None, dict]:
+        if not auth_header or not user_id:
+            return None, {}
+        try:
+            return self.conversation_repository.consume_pending_action(
+                auth_header,
+                user_id,
+            )
+        except Exception:
+            self._log_repository_failure("챗봇 대기 작업 조회에 실패했습니다.")
+            return None, {}
 
-    def _pop_pending_action(self, user_id: str | None) -> str | None:
-        if not user_id:
+    def _peek_pending_action(
+        self,
+        auth_header: str | None,
+        user_id: str | None,
+    ) -> str | None:
+        if not auth_header or not user_id:
             return None
-        import time
-
-        key = self._conversation_key(user_id)
-        pending = self._pending_actions.get(key)
-        if not pending:
+        try:
+            return self.conversation_repository.peek_pending_action(
+                auth_header,
+                user_id,
+            )
+        except Exception:
+            self._log_repository_failure("챗봇 대기 작업 조회에 실패했습니다.")
             return None
-        if pending.get("expires_at", 0) < time.time():
-            self._pending_actions.pop(key, None)
-            return None
-        self._pending_actions.pop(key, None)
-        return pending.get("action")
-
-    def _peek_pending_action(self, user_id: str | None) -> str | None:
-        if not user_id:
-            return None
-        import time
-
-        key = self._conversation_key(user_id)
-        pending = self._pending_actions.get(key)
-        if not pending:
-            return None
-        if pending.get("expires_at", 0) < time.time():
-            self._pending_actions.pop(key, None)
-            return None
-        return pending.get("action")
 
     def _build_prompt_for_user(
         self,
@@ -328,14 +320,20 @@ class ChatbotService:
             return False
         return normalized in {phrase.replace(" ", "") for phrase in CONFIRMATION_PHRASES}
 
-    def _maybe_set_pending_from_reply(self, user_id: str | None, user_text: str, assistant_reply: str) -> None:
+    def _maybe_set_pending_from_reply(
+        self,
+        auth_header: str | None,
+        user_id: str | None,
+        user_text: str,
+        assistant_reply: str,
+    ) -> None:
         combined = f"{user_text}\n{assistant_reply}"
         is_trade_proposal_context = any(keyword in combined for keyword in ["매매 제안", "투자 제안", "종목 추천", "매수", "매도"])
         asks_portfolio_lookup = any(keyword in combined for keyword in ["포트폴리오 요약", "보유자산", "평가 자산", "주문 가능 현금"])
         asks_permission = any(keyword in assistant_reply for keyword in ["조회해도", "확인해도", "조회부터", "확인부터"])
 
         if is_trade_proposal_context and asks_portfolio_lookup and asks_permission:
-            self._set_pending_action(user_id, "portfolio_summary")
+            self._set_pending_action(auth_header, user_id, "portfolio_summary")
 
     def _run_pending_action(self, action: str, auth_header: str | None, text: str) -> dict | None:
         if action == "portfolio_summary":
@@ -390,9 +388,6 @@ class ChatbotService:
             arguments = {}
 
         enforce_tool_safety(tool_name, arguments)
-        if tool_name == "create_trade_proposal":
-            return create_trade_proposal(auth_header, arguments)
-
         tool_map = {
             "get_home_market_rankings": get_home_market_rankings,
             "get_portfolio_summary": get_portfolio_summary,
@@ -417,6 +412,7 @@ class ChatbotService:
         auth_header: str | None = None,
         user_timezone: str | None = None,
         trace_callback: TraceCallback | None = None,
+        delta_callback: Callable[[str], None] | None = None,
     ) -> dict:
         text = str(message or "").strip()
         if not text:
@@ -427,7 +423,10 @@ class ChatbotService:
 
         if self._is_confirmation(text):
             self._emit_trace(trace_callback, "pending_action", "대기 작업 확인")
-            pending_action = self._pop_pending_action(user_id)
+            pending_action, _pending_payload = self._consume_pending_action(
+                auth_header,
+                user_id,
+            )
             if pending_action:
                 self._emit_trace(trace_callback, "tool", "보유자산 조회")
                 tool_result = self._run_pending_action(pending_action, auth_header, text)
@@ -467,16 +466,29 @@ class ChatbotService:
             }
 
         self._emit_trace(trace_callback, "history", "대화 이력 확인")
-        self._load_persisted_history(auth_header, user_id)
+        history = self._load_recent_history(auth_header, user_id)
         self._emit_trace(trace_callback, "llm", "LLM 답변 준비")
-        result = self.llm_client.generate_reply(
-            system_prompt=self._build_prompt_for_user(auth_header, user_id, text, user_timezone, trace_callback),
-            user_message=text,
-            user_id=user_id,
-            auth_header=auth_header,
-            function_schemas=FUNCTION_SCHEMAS,
-            history=self._get_recent_history(user_id),
-        )
+        llm_arguments = {
+            "system_prompt": self._build_prompt_for_user(
+                auth_header,
+                user_id,
+                text,
+                user_timezone,
+                trace_callback,
+            ),
+            "user_message": text,
+            "user_id": user_id,
+            "auth_header": auth_header,
+            "function_schemas": FUNCTION_SCHEMAS,
+            "history": history,
+        }
+        if delta_callback:
+            result = self.llm_client.stream_reply(
+                **llm_arguments,
+                on_delta=delta_callback,
+            )
+        else:
+            result = self.llm_client.generate_reply(**llm_arguments)
 
         for tool_call in result.get("tool_calls") or []:
             self._emit_trace(trace_callback, "openai_tool_call", "OpenAI 도구 호출")
@@ -500,7 +512,7 @@ class ChatbotService:
 
         reply_text = result["reply"]
         self._record_exchange(auth_header, user_id, text, reply_text)
-        self._maybe_set_pending_from_reply(user_id, text, reply_text)
+        self._maybe_set_pending_from_reply(auth_header, user_id, text, reply_text)
 
         return {
             "reply": reply_text,
@@ -512,6 +524,6 @@ class ChatbotService:
                 "model": result.get("model"),
                 "usage": result.get("usage"),
                 "tool_calls": result.get("tool_calls"),
-                "pending_action": self._peek_pending_action(user_id),
+                "pending_action": self._peek_pending_action(auth_header, user_id),
             },
         }

@@ -1,8 +1,9 @@
 import json
 import queue
 import threading
+from uuid import uuid4
 
-from flask import Blueprint, Response, jsonify, request, stream_with_context
+from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
 from backend.services.auth_service import validate_access_token
 from backend.services.chatbot.chat_service import ChatbotService
@@ -73,6 +74,8 @@ def stream_chatbot_message():
         return jsonify(format_error_payload(error, "챗봇 인증 실패")), 401
 
     data = request.json or {}
+    app = current_app._get_current_object()
+    request_id = uuid4().hex[:16]
 
     def generate():
         event_queue: queue.Queue[tuple[str, dict]] = queue.Queue()
@@ -80,23 +83,36 @@ def stream_chatbot_message():
         def publish_trace(step: dict) -> None:
             event_queue.put(("trace", step))
 
+        def publish_delta(text: str) -> None:
+            event_queue.put(("delta", {"text": text}))
+
         def run_reply() -> None:
-            try:
-                result = chatbot_service.reply(
-                    data.get("message"),
-                    user_id=user_id,
-                    auth_header=auth_header,
-                    user_timezone=data.get("timezone"),
-                    trace_callback=publish_trace,
-                )
-                event_queue.put(("result", result))
-            except Exception as error:
-                event_queue.put(("error", format_error_payload(error, "챗봇 스트림 생성 실패")))
+            with app.app_context():
+                try:
+                    result = chatbot_service.reply(
+                        data.get("message"),
+                        user_id=user_id,
+                        auth_header=auth_header,
+                        user_timezone=data.get("timezone"),
+                        trace_callback=publish_trace,
+                        delta_callback=publish_delta,
+                    )
+                    event_queue.put(("result", result))
+                except Exception as error:
+                    app.logger.exception(
+                        "챗봇 스트림 생성 실패: request_id=%s user_id=%s",
+                        request_id,
+                        user_id,
+                    )
+                    payload = format_error_payload(error, "챗봇 스트림 생성 실패")
+                    payload["meta"] = {"request_id": request_id}
+                    event_queue.put(("error", payload))
 
         yield _format_sse_event("trace", {"kind": "request", "label": "요청 분석"})
         worker = threading.Thread(target=run_reply, daemon=True)
         worker.start()
         emitted_trace_keys = {("request", "요청 분석")}
+        emitted_live_delta = False
 
         while True:
             event, payload = event_queue.get()
@@ -108,12 +124,20 @@ def stream_chatbot_message():
                 yield _format_sse_event("trace", payload)
                 continue
 
+            if event == "delta":
+                emitted_live_delta = True
+                yield _format_sse_event("delta", payload)
+                continue
+
             if event == "error":
                 yield _format_sse_event("error", payload)
                 break
 
             result = payload
-            meta = result.get("meta") or {}
+            meta = {
+                **(result.get("meta") or {}),
+                "request_id": request_id,
+            }
             for step in meta.get("trace_steps") or []:
                 if isinstance(step, dict):
                     trace_key = (step.get("kind"), step.get("label"))
@@ -121,8 +145,9 @@ def stream_chatbot_message():
                         emitted_trace_keys.add(trace_key)
                         yield _format_sse_event("trace", step)
             yield _format_sse_event("trace", {"kind": "compose", "label": "답변 작성"})
-            for chunk in _chunk_reply_text(result.get("reply") or ""):
-                yield _format_sse_event("delta", {"text": chunk})
+            if not emitted_live_delta:
+                for chunk in _chunk_reply_text(result.get("reply") or ""):
+                    yield _format_sse_event("delta", {"text": chunk})
             yield _format_sse_event(
                 "done",
                 {

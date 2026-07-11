@@ -5,6 +5,7 @@ import requests
 from urllib.parse import urlencode
 
 _FUTURES_EXCHANGE_INFO_CACHE = {}
+_SPOT_SYMBOL_INFO_CACHE = {}
 _BINANCE_TIME_SYNC_TTL_SECONDS = 300
 
 
@@ -153,6 +154,58 @@ class BinanceSpotClient:
             "currency": "USDT",
             "raw": data,
         }
+
+    def get_spot_symbol_info(self, symbol: str) -> dict:
+        """현물 주문 심볼의 기준자산과 결제자산 메타데이터를 반환합니다."""
+        normalized_symbol = _normalize_spot_symbol(symbol)
+        if not normalized_symbol:
+            raise ValueError("바이낸스 심볼 메타데이터 조회를 위한 심볼이 비어 있습니다.")
+        cache_key = (self.base_url, normalized_symbol)
+        cached = _SPOT_SYMBOL_INFO_CACHE.get(cache_key)
+        if cached:
+            return dict(cached)
+
+        response = requests.get(
+            f"{self.base_url}/api/v3/exchangeInfo",
+            params={"symbol": normalized_symbol},
+            timeout=5,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"바이낸스 심볼 메타데이터 조회 실패: HTTP {response.status_code}"
+            )
+        rows = (response.json() or {}).get("symbols") or []
+        row = next(
+            (
+                item
+                for item in rows
+                if str(item.get("symbol") or "").upper() == normalized_symbol
+            ),
+            None,
+        )
+        base_asset = str((row or {}).get("baseAsset") or "").upper()
+        quote_asset = str((row or {}).get("quoteAsset") or "").upper()
+        if not base_asset or not quote_asset:
+            raise RuntimeError("바이낸스 심볼 메타데이터에 기준자산 정보가 없습니다.")
+        filters = {item.get("filterType"): item for item in (row or {}).get("filters", []) or []}
+        lot_size = filters.get("LOT_SIZE") or {}
+        market_lot_size = filters.get("MARKET_LOT_SIZE") or {}
+        price_filter = filters.get("PRICE_FILTER") or {}
+
+        result = {
+            "symbol": normalized_symbol,
+            "base_asset": base_asset,
+            "quote_asset": quote_asset,
+            "min_qty": _to_float(lot_size.get("minQty")),
+            "max_qty": _to_float(lot_size.get("maxQty")),
+            "step_size": _to_float(lot_size.get("stepSize")),
+            "market_min_qty": _to_float(market_lot_size.get("minQty")),
+            "market_max_qty": _to_float(market_lot_size.get("maxQty")),
+            "market_step_size": _to_float(market_lot_size.get("stepSize")),
+            "tick_size": _to_float(price_filter.get("tickSize")),
+        }
+        _SPOT_SYMBOL_INFO_CACHE[cache_key] = result
+        return dict(result)
 
     def get_balance(self) -> dict:
         """

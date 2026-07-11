@@ -1,3 +1,12 @@
+function getSafeRequestId(payloadOrError) {
+  const requestId = String(
+    payloadOrError?.meta?.request_id
+    || payloadOrError?.request_id
+    || '',
+  ).trim()
+  return /^[A-Za-z0-9_-]{1,64}$/.test(requestId) ? requestId : ''
+}
+
 export function getApiErrorMessage(payloadOrError, fallback = '요청 처리에 실패했습니다.') {
   const payload = payloadOrError || {}
   const error = payload.error || {}
@@ -14,15 +23,18 @@ export function getApiErrorMessage(payloadOrError, fallback = '요청 처리에 
   const title = hasStructuredError ? uniqueLines.join('\n') : rawTitle
   const detail = hasStructuredError ? '' : (detailParts[0] || '')
   const raw = error.raw_message || ''
+  const requestId = getSafeRequestId(payloadOrError)
 
   return {
     title,
     detail,
     raw,
+    requestId,
   }
 }
 
 export function buildApiErrorText(payloadOrError, fallback = '요청 처리에 실패했습니다.') {
   const message = getApiErrorMessage(payloadOrError, fallback)
-  return message.detail ? `${message.title} ${message.detail}` : message.title
+  const text = message.detail ? `${message.title} ${message.detail}` : message.title
+  return message.requestId ? `${text}\n요청 ID: ${message.requestId}` : text
 }

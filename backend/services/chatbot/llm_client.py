@@ -1,5 +1,7 @@
 import os
+import json
 from datetime import date
+from typing import Callable
 
 import requests
 
@@ -73,15 +75,15 @@ class ChatbotLLMClient:
             })
         return tools
 
-    def generate_reply(
+    def _build_request_payload(
         self,
         *,
         system_prompt: str,
         user_message: str,
-        user_id: str | None = None,
-        auth_header: str | None = None,
-        function_schemas: list[dict] | None = None,
-        history: list[dict] | None = None,
+        user_id: str | None,
+        auth_header: str | None,
+        function_schemas: list[dict] | None,
+        history: list[dict] | None,
     ) -> dict:
         if not self.api_key:
             raise RuntimeError("OPENAI_API_KEY가 설정되어 있지 않습니다.")
@@ -109,7 +111,6 @@ class ChatbotLLMClient:
             *history_messages,
             {"role": "user", "content": text},
         ]
-
         if len(messages) > self.max_history_messages + 1:
             messages = [messages[0], *messages[-self.max_history_messages:]]
 
@@ -119,11 +120,30 @@ class ChatbotLLMClient:
             "temperature": 0.3,
             "max_tokens": self.max_output_tokens,
         }
-
         tools = self._to_openai_tools(function_schemas)
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        return payload
+
+    def generate_reply(
+        self,
+        *,
+        system_prompt: str,
+        user_message: str,
+        user_id: str | None = None,
+        auth_header: str | None = None,
+        function_schemas: list[dict] | None = None,
+        history: list[dict] | None = None,
+    ) -> dict:
+        payload = self._build_request_payload(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            user_id=user_id,
+            auth_header=auth_header,
+            function_schemas=function_schemas,
+            history=history,
+        )
 
         response = requests.post(
             OPENAI_CHAT_COMPLETIONS_URL,
@@ -149,6 +169,136 @@ class ChatbotLLMClient:
 
         return {
             "reply": content,
+            "usage": usage,
+            "tool_calls": tool_calls[: self.max_tool_calls],
+            "model": self.model,
+        }
+
+    def stream_reply(
+        self,
+        *,
+        system_prompt: str,
+        user_message: str,
+        user_id: str | None,
+        auth_header: str | None,
+        function_schemas: list[dict] | None,
+        history: list[dict] | None,
+        on_delta: Callable[[str], None],
+    ) -> dict:
+        payload = {
+            **self._build_request_payload(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                user_id=user_id,
+                auth_header=auth_header,
+                function_schemas=function_schemas,
+                history=history,
+            ),
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        response = requests.post(
+            OPENAI_CHAT_COMPLETIONS_URL,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=self.timeout_seconds,
+            stream=True,
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(f"OpenAI 챗봇 요청 실패: HTTP {response.status_code}")
+
+        reply_parts = []
+        usage = {}
+        tool_call_deltas: dict[int, dict] = {}
+        response_mode = None
+        saw_done = False
+
+        for raw_line in response.iter_lines(decode_unicode=True):
+            if isinstance(raw_line, bytes):
+                line = raw_line.decode("utf-8", errors="replace")
+            else:
+                line = str(raw_line or "")
+            if not line.startswith("data:"):
+                continue
+
+            event_data = line[5:].strip()
+            if event_data == "[DONE]":
+                saw_done = True
+                break
+            if not event_data:
+                continue
+
+            try:
+                chunk = json.loads(event_data)
+            except (TypeError, ValueError) as error:
+                raise RuntimeError("OpenAI 챗봇 스트림 응답을 해석하지 못했습니다.") from error
+            if not isinstance(chunk, dict):
+                raise RuntimeError("OpenAI 챗봇 스트림 응답을 해석하지 못했습니다.")
+            if chunk.get("error"):
+                raise RuntimeError("OpenAI 챗봇 스트림 처리에 실패했습니다.")
+
+            chunk_usage = chunk.get("usage")
+            if isinstance(chunk_usage, dict):
+                usage = chunk_usage
+
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            content = delta.get("content")
+            tool_call_chunks = delta.get("tool_calls") or []
+            if response_mode is None:
+                if tool_call_chunks:
+                    response_mode = "tool"
+                elif isinstance(content, str) and content:
+                    response_mode = "text"
+
+            if response_mode == "text" and isinstance(content, str) and content:
+                reply_parts.append(content)
+                on_delta(content)
+
+            if response_mode != "tool":
+                continue
+            for tool_call_delta in tool_call_chunks:
+                index = tool_call_delta.get("index")
+                if not isinstance(index, int):
+                    index = len(tool_call_deltas)
+                current = tool_call_deltas.setdefault(
+                    index,
+                    {
+                        "id": "",
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                    },
+                )
+                call_id = tool_call_delta.get("id")
+                if isinstance(call_id, str):
+                    current["id"] += call_id
+                call_type = tool_call_delta.get("type")
+                if isinstance(call_type, str) and call_type:
+                    current["type"] = call_type
+
+                function_delta = tool_call_delta.get("function") or {}
+                function_name = function_delta.get("name")
+                if isinstance(function_name, str):
+                    current["function"]["name"] += function_name
+                arguments = function_delta.get("arguments")
+                if isinstance(arguments, str):
+                    current["function"]["arguments"] += arguments
+
+        if not saw_done:
+            raise RuntimeError("OpenAI 챗봇 스트림이 비정상 종료되었습니다.")
+
+        reply_text = "".join(reply_parts)
+        if not reply_text:
+            reply_text = "응답을 만들지 못했습니다. 잠시 후 다시 시도해 주세요."
+
+        tool_calls = [tool_call_deltas[index] for index in sorted(tool_call_deltas)]
+        return {
+            "reply": reply_text,
             "usage": usage,
             "tool_calls": tool_calls[: self.max_tool_calls],
             "model": self.model,

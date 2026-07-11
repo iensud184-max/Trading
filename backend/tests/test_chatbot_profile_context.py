@@ -1,3 +1,4 @@
+from backend.services.chatbot.conversation_repository import ChatbotConversationRepository
 from backend.services.chatbot.chat_service import ChatbotService
 
 
@@ -6,10 +7,35 @@ class FakeLLMClient:
         self.system_prompt = None
         self.history = None
         self.reply = "테스트 응답"
+        self.generate_calls = 0
+        self.stream_calls = 0
 
     def generate_reply(self, system_prompt, user_message, user_id=None, auth_header=None, function_schemas=None, history=None):
+        self.generate_calls += 1
         self.system_prompt = system_prompt
         self.history = history
+        return {
+            "reply": self.reply,
+            "model": "fake",
+            "usage": {},
+            "tool_calls": [],
+        }
+
+    def stream_reply(
+        self,
+        system_prompt,
+        user_message,
+        user_id=None,
+        auth_header=None,
+        function_schemas=None,
+        history=None,
+        on_delta=None,
+    ):
+        self.stream_calls += 1
+        self.system_prompt = system_prompt
+        self.history = history
+        on_delta("테스트 ")
+        on_delta("응답")
         return {
             "reply": self.reply,
             "model": "fake",
@@ -23,24 +49,71 @@ class FakeRAGService:
         return "", []
 
 
-def test_reply_loads_and_persists_authenticated_chat_history(monkeypatch):
-    queries = []
+class FakeConversationSupabaseBoundary:
+    def __init__(self):
+        self.history = []
+        self.state = {}
 
-    def fake_query(auth_header, endpoint, method="GET", json_data=None, params=None):
-        queries.append({
-            "auth_header": auth_header,
-            "endpoint": endpoint,
-            "method": method,
-            "json_data": json_data,
-            "params": params,
-        })
-        if method == "GET":
-            return [{"role": "user", "message": "이전 질문", "created_at": "2026-07-10T00:00:00Z"}]
-        return [{"id": 1}, {"id": 2}]
+    def query(
+        self,
+        auth_header,
+        endpoint,
+        method="GET",
+        json_data=None,
+        params=None,
+        extra_headers=None,
+    ):
+        params = params or {}
+        user_id = str(params.get("user_id") or "").removeprefix("eq.")
+        if endpoint == "chat_history":
+            if method == "POST":
+                for row in json_data:
+                    self.history.append({
+                        **row,
+                        "id": len(self.history) + 1,
+                        "created_at": f"2026-07-10T01:00:{len(self.history) + 1:02d}Z",
+                    })
+                return list(self.history)
+            rows = [row for row in self.history if row.get("user_id") == user_id]
+            return list(reversed(rows))
+        if endpoint == "chatbot_conversation_states":
+            if method == "GET":
+                row = self.state.get(user_id)
+                return [dict(row)] if row else []
+            if method == "POST":
+                payload = dict(json_data or {})
+                self.state[payload["user_id"]] = payload
+                return [dict(payload)]
+            if method == "PATCH":
+                row = self.state.get(user_id)
+                if not row:
+                    return []
+                expected_action = params.get("pending_action")
+                expected_expires_at = params.get("pending_expires_at")
+                if expected_action and expected_action != f"eq.{row.get('pending_action')}":
+                    return []
+                if expected_expires_at and expected_expires_at != f"eq.{row.get('pending_expires_at')}":
+                    return []
+                row.update(json_data or {})
+                if (extra_headers or {}).get("Prefer") == "return=representation":
+                    return [dict(row)]
+                return None
+        raise AssertionError(f"지원하지 않는 Supabase 요청: {endpoint} {method}")
+
+
+def test_reply_loads_and_persists_authenticated_chat_history(monkeypatch):
+    boundary = FakeConversationSupabaseBoundary()
+    boundary.history.append({
+        "id": 1,
+        "user_id": "user-1",
+        "role": "user",
+        "message": "이전 질문",
+        "created_at": "2026-07-10T00:00:00Z",
+    })
 
     monkeypatch.setattr(
-        "backend.services.chatbot.chat_service.safe_query_supabase",
-        fake_query,
+        "backend.services.chatbot.conversation_repository.query_supabase",
+        boundary.query,
     )
     monkeypatch.setattr(
         "backend.services.chatbot.chat_service.run_chatbot_tool",
@@ -56,24 +129,50 @@ def test_reply_loads_and_persists_authenticated_chat_history(monkeypatch):
 
     assert result["reply"] == "테스트 응답"
     assert fake_llm.history[0] == {"role": "user", "content": "이전 질문"}
-    post_calls = [query for query in queries if query["method"] == "POST"]
-    assert len(post_calls) == 1
-    assert post_calls[0]["endpoint"] == "chat_history"
-    assert [row["role"] for row in post_calls[0]["json_data"]] == ["user", "assistant"]
-    assert all(row["user_id"] == "user-1" for row in post_calls[0]["json_data"])
+    assert ChatbotConversationRepository().load_recent_history(
+        "Bearer test",
+        "user-1",
+    )[-2:] == [
+        {"role": "user", "content": "새 질문"},
+        {"role": "assistant", "content": "테스트 응답"},
+    ]
+
+
+def test_reply_uses_llm_stream_when_delta_callback_is_provided(monkeypatch):
+    boundary = FakeConversationSupabaseBoundary()
+    monkeypatch.setattr(
+        "backend.services.chatbot.conversation_repository.query_supabase",
+        boundary.query,
+    )
+    monkeypatch.setattr(
+        "backend.services.chatbot.chat_service.run_chatbot_tool",
+        lambda auth_header, text: None,
+    )
+    service = ChatbotService()
+    fake_llm = FakeLLMClient()
+    service.llm_client = fake_llm
+    service.rag_service = FakeRAGService()
+    deltas = []
+
+    result = service.reply(
+        "새 질문",
+        user_id="user-1",
+        auth_header="Bearer test",
+        delta_callback=deltas.append,
+    )
+
+    assert result["reply"] == "테스트 응답"
+    assert deltas == ["테스트 ", "응답"]
+    assert fake_llm.stream_calls == 1
+    assert fake_llm.generate_calls == 0
 
 
 def test_anonymous_reply_does_not_read_or_write_shared_history(monkeypatch):
-    query_count = 0
-
-    def fake_query(*args, **kwargs):
-        nonlocal query_count
-        query_count += 1
-        return []
+    boundary = FakeConversationSupabaseBoundary()
 
     monkeypatch.setattr(
-        "backend.services.chatbot.chat_service.safe_query_supabase",
-        fake_query,
+        "backend.services.chatbot.conversation_repository.query_supabase",
+        boundary.query,
     )
     monkeypatch.setattr(
         "backend.services.chatbot.chat_service.run_chatbot_tool",
@@ -81,15 +180,16 @@ def test_anonymous_reply_does_not_read_or_write_shared_history(monkeypatch):
     )
 
     service = ChatbotService()
-    service.llm_client = FakeLLMClient()
+    fake_llm = FakeLLMClient()
+    service.llm_client = fake_llm
     service.rag_service = FakeRAGService()
 
     service.reply("첫 번째 질문", user_id=None, auth_header=None)
     service.reply("두 번째 질문", user_id=None, auth_header=None)
 
-    assert query_count == 0
-    assert service._get_recent_history(None) == []
-    assert service._peek_pending_action(None) is None
+    assert boundary.history == []
+    assert boundary.state == {}
+    assert fake_llm.history == []
 
 
 def test_reply_adds_investment_profile_context_to_system_prompt(monkeypatch):
@@ -137,6 +237,11 @@ def test_reply_adds_current_datetime_context_to_system_prompt(monkeypatch):
 
 
 def test_reply_executes_pending_portfolio_summary_on_confirmation(monkeypatch):
+    boundary = FakeConversationSupabaseBoundary()
+    monkeypatch.setattr(
+        "backend.services.chatbot.conversation_repository.query_supabase",
+        boundary.query,
+    )
     monkeypatch.setattr(
         "backend.services.chatbot.chat_service.run_chatbot_tool",
         lambda auth_header, text: None,
@@ -152,12 +257,20 @@ def test_reply_executes_pending_portfolio_summary_on_confirmation(monkeypatch):
     service = ChatbotService()
     service.llm_client = FakeLLMClient()
     service.rag_service = FakeRAGService()
-    service._set_pending_action("user-1", "portfolio_summary")
+    service.conversation_repository.set_pending_action(
+        "Bearer test",
+        "user-1",
+        "portfolio_summary",
+    )
 
     result = service.reply("조회해도 돼", user_id="user-1", auth_header="Bearer test")
 
     assert result["reply"] == "평가 자산 합계: 1,000,000원"
     assert result["meta"]["source"] == "PROJECT_TOOL_PENDING"
+    assert service.conversation_repository.peek_pending_action(
+        "Bearer test",
+        "user-1",
+    ) is None
 
 
 def test_reply_includes_trace_steps_for_recommendation_rag_tool(monkeypatch):
@@ -224,6 +337,11 @@ def test_reply_emits_live_trace_callback_while_running_project_tool(monkeypatch)
 
 
 def test_reply_passes_recent_history_to_llm(monkeypatch):
+    boundary = FakeConversationSupabaseBoundary()
+    monkeypatch.setattr(
+        "backend.services.chatbot.conversation_repository.query_supabase",
+        boundary.query,
+    )
     monkeypatch.setattr(
         "backend.services.chatbot.chat_service.run_chatbot_tool",
         lambda auth_header, text: None,
@@ -233,12 +351,16 @@ def test_reply_passes_recent_history_to_llm(monkeypatch):
         lambda auth_header, user_id=None: "",
     )
 
-    service = ChatbotService()
+    first_service = ChatbotService()
+    first_service.llm_client = FakeLLMClient()
+    first_service.rag_service = FakeRAGService()
+    first_service.reply("첫 번째 질문", user_id="user-1", auth_header="Bearer test")
+
+    second_service = ChatbotService()
     fake_llm = FakeLLMClient()
-    service.llm_client = fake_llm
-    service.rag_service = FakeRAGService()
-    service.reply("국내주식 매매 제안해줘", user_id="user-1", auth_header="Bearer test")
-    service.reply("조회해도 돼", user_id="user-1", auth_header="Bearer test")
+    second_service.llm_client = fake_llm
+    second_service.rag_service = FakeRAGService()
+    second_service.reply("두 번째 질문", user_id="user-1", auth_header="Bearer test")
 
     assert fake_llm.history
     assert fake_llm.history[-1]["content"] == "테스트 응답"

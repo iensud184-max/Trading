@@ -1,9 +1,12 @@
 import re
 import os
+import json
+import math
 import uuid
 import time
 import threading
 import requests
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, current_app
 from backend.services.supabase_client import query_supabase
@@ -29,8 +32,24 @@ PRICE_CHANGE_CACHE_TTL = 10
 CACHE_TTL_SECONDS = 10  # 기본값 10초 유효
 LEVEL2_CACHE_TTL_SECONDS = 10
 REAL_ORDER_LIMIT_KRW = 100000.0
+USD_KRW_FALLBACK = 1500.0
 SUPPORTED_TRADE_EXCHANGES = {"TOSS", "KIS", "COINONE", "BINANCE", "BINANCE_UM_FUTURES"}
 CRYPTO_EXCHANGES = {"COINONE", "BINANCE", "BINANCE_UM_FUTURES"}
+BINANCE_SPOT_QUOTE_ASSETS = (
+    "FDUSD",
+    "USDT",
+    "BUSD",
+    "USDC",
+    "TUSD",
+    "EUR",
+    "TRY",
+    "BRL",
+    "GBP",
+    "AUD",
+    "BTC",
+    "ETH",
+    "BNB",
+)
 
 def determine_market_country(symbol: str) -> str:
     """
@@ -402,12 +421,19 @@ def _load_user_exchange_record(auth_header: str, user_id: str, exchange: str, br
     }
     records = query_supabase(auth_header, "user_api_keys", "GET", params=params)
     if not records:
-        raise ValueError(f"등록된 {credential_exchange} ({broker_env}) API 크리덴셜 정보가 없습니다.")
+        raise ValueError(f"등록된 {credential_exchange} ({broker_env}) API 키 정보가 없습니다.")
 
     record = records[0]
     access_key = crypto_helper.decrypt(record.get("encrypted_access_key"))
     secret_key = crypto_helper.decrypt(record.get("encrypted_secret_key"))
     return record, access_key, secret_key
+
+
+def _format_user_value_error_message(error: ValueError) -> str:
+    """
+    내부 구현 용어가 사용자 화면에 노출되지 않도록 ValueError 메시지를 정규화합니다.
+    """
+    return str(error).replace("API 크리덴셜 정보", "API 키 정보").replace("API 크리덴셜", "API 키")
 
 
 def _query_user_exchange_records(auth_header: str, user_id: str, exchange: str, broker_env: str | None = None) -> list[dict]:
@@ -590,6 +616,41 @@ def _load_user_trade_proposal(auth_header: str, user_id: str, proposal_id: str) 
     return records[0]
 
 
+def _claim_trade_proposal_for_execution(
+    auth_header: str,
+    proposal_id: str,
+) -> dict | None:
+    """PENDING 매매 제안을 원자적으로 승인 선점합니다."""
+    rows = query_supabase(
+        auth_header,
+        "rpc/claim_trade_proposal_for_execution",
+        "POST",
+        json_data={"p_proposal_id": proposal_id},
+    ) or []
+    return rows[0] if isinstance(rows, list) and rows else None
+
+
+def _reject_pending_trade_proposal(
+    auth_header: str,
+    user_id: str,
+    proposal_id: str,
+) -> dict | None:
+    """PENDING 매매 제안만 조건부 갱신하여 승인과의 경쟁을 차단합니다."""
+    rows = query_supabase(
+        auth_header,
+        "trade_proposals",
+        "PATCH",
+        json_data={"status": "REJECTED"},
+        params={
+            "id": f"eq.{proposal_id}",
+            "user_id": f"eq.{user_id}",
+            "status": "eq.PENDING",
+        },
+        extra_headers={"Prefer": "return=representation"},
+    ) or []
+    return rows[0] if isinstance(rows, list) and rows else None
+
+
 def _resolve_proposal_order_data(auth_header: str, user_id: str, data: dict) -> tuple[dict, dict | None]:
     """승인 카드 실행 시 PENDING 제안의 주문 필드를 서버 기준으로 고정합니다."""
     proposal_id = str(data.get("proposal_id") or "").strip()
@@ -620,6 +681,167 @@ def _patch_trade_proposal(auth_header: str, proposal_id: str, payload: dict):
     return query_supabase(auth_header, f"trade_proposals?id=eq.{proposal_id}", "PATCH", json_data=payload)
 
 
+def _patch_trade_proposal_returning(
+    auth_header: str,
+    user_id: str,
+    proposal_id: str,
+    payload: dict,
+) -> dict:
+    """주문 접수 결과를 갱신하고 정확히 1행이 반영됐는지 검증합니다."""
+    rows = query_supabase(
+        auth_header,
+        "trade_proposals",
+        "PATCH",
+        json_data=payload,
+        params={
+            "id": f"eq.{proposal_id}",
+            "user_id": f"eq.{user_id}",
+        },
+        extra_headers={"Prefer": "return=representation"},
+    )
+    if (
+        not isinstance(rows, list)
+        or len(rows) != 1
+        or not isinstance(rows[0], dict)
+    ):
+        raise RuntimeError("주문 접수 결과는 정확히 1행 갱신되어야 합니다.")
+    return rows[0]
+
+
+def _normalize_manual_order_idempotency_key(value) -> str:
+    """수동 주문 멱등성 키를 trade_proposals UUID 형식으로 정규화합니다."""
+    try:
+        return str(uuid.UUID(str(value or "").strip()))
+    except (AttributeError, TypeError, ValueError):
+        raise ValueError("수동 주문에는 유효한 UUID 형식의 idempotency_key가 필요합니다.")
+
+
+def _is_unique_constraint_error(error: Exception) -> bool:
+    normalized = str(error or "").casefold()
+    return "23505" in normalized or "duplicate key" in normalized or "unique constraint" in normalized
+
+
+def _manual_order_execution_fingerprint(order_data: dict) -> str:
+    def normalize_number(value):
+        if value in (None, ""):
+            return None
+        return float(value)
+
+    def normalize_boolean(value):
+        if isinstance(value, bool):
+            return value
+        return str(value or "").strip().casefold() in {"true", "1", "yes", "on"}
+
+    normalized = {
+        "exchange": str(order_data.get("exchange") or "").upper(),
+        "symbol": str(order_data.get("symbol") or "").upper(),
+        "action": str(order_data.get("action") or "").upper(),
+        "order_type": str(order_data.get("order_type") or "").upper(),
+        "broker_env": str(order_data.get("broker_env") or "REAL").upper(),
+        "quantity": normalize_number(order_data.get("quantity")),
+        "price": normalize_number(order_data.get("price")),
+        "auto_exit": normalize_boolean(order_data.get("auto_exit")),
+        "target_profit_rate": normalize_number(order_data.get("target_profit_rate")),
+        "stop_loss_rate": normalize_number(order_data.get("stop_loss_rate")),
+        "auto_exit_execution_mode": str(
+            order_data.get("auto_exit_execution_mode") or "PROPOSAL"
+        ).upper(),
+        "auto_restart_on_partial_fill": normalize_boolean(
+            order_data.get("auto_restart_on_partial_fill")
+        ),
+        "position_side": str(order_data.get("position_side") or "").upper(),
+        "reduce_only": normalize_boolean(order_data.get("reduce_only")),
+        "leverage": normalize_number(order_data.get("leverage")),
+        "margin_type": str(order_data.get("margin_type") or "").upper(),
+    }
+    return json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+
+
+def _manual_order_matches_existing(existing: dict, order_data: dict) -> bool:
+    stored_fingerprint = str(
+        ((existing.get("raw_order_payload") or {}).get("idempotency_fingerprint"))
+        or ""
+    )
+    if stored_fingerprint:
+        return stored_fingerprint == _manual_order_execution_fingerprint(order_data)
+
+    text_fields = {
+        "exchange": str(order_data.get("exchange") or "").upper(),
+        "symbol": str(order_data.get("symbol") or "").upper(),
+        "side": str(order_data.get("action") or "").upper(),
+        "ord_type": str(order_data.get("order_type") or "").upper(),
+        "broker_env": str(order_data.get("broker_env") or "REAL").upper(),
+    }
+    for field, expected in text_fields.items():
+        actual = existing.get(field)
+        if field == "symbol":
+            actual = actual or existing.get("ticker")
+        if str(actual or "").upper() != expected:
+            return False
+
+    try:
+        existing_volume = float(existing.get("volume"))
+        requested_volume = float(order_data.get("quantity"))
+        existing_price = float(existing.get("price"))
+        requested_price = float(order_data.get("price"))
+    except (TypeError, ValueError):
+        return False
+    return math.isclose(existing_volume, requested_volume) and math.isclose(
+        existing_price,
+        requested_price,
+    )
+
+
+def _create_or_load_manual_order_proposal(
+    auth_header: str,
+    user_id: str,
+    idempotency_key: str,
+    order_data: dict,
+) -> tuple[dict, bool]:
+    """수동 주문을 외부 전송 전 PENDING 상태로 기록하고 재전송을 차단합니다."""
+    normalized_key = _normalize_manual_order_idempotency_key(idempotency_key)
+    exchange = str(order_data.get("exchange") or "").upper()
+    symbol = str(order_data.get("symbol") or "").upper()
+    asset_type = "STOCK" if exchange in {"TOSS", "KIS"} else "CRYPTO"
+    payload = {
+        "id": normalized_key,
+        "user_id": user_id,
+        "exchange": exchange,
+        "asset_type": asset_type,
+        "ticker": symbol,
+        "symbol": symbol,
+        "side": str(order_data.get("action") or "").upper(),
+        "price": order_data.get("price"),
+        "volume": order_data.get("quantity"),
+        "ord_type": str(order_data.get("order_type") or "").upper(),
+        "broker_env": str(order_data.get("broker_env") or "REAL").upper(),
+        "status": "PENDING",
+        "raw_order_payload": {
+            "source": "MANUAL_ORDER",
+            "idempotency_fingerprint": _manual_order_execution_fingerprint(order_data),
+        },
+    }
+    try:
+        rows = query_supabase(
+            auth_header,
+            "trade_proposals",
+            "POST",
+            json_data=payload,
+            extra_headers={"Prefer": "return=representation"},
+        )
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+            raise RuntimeError("수동 주문 멱등성 레코드가 정확히 1행 생성되어야 합니다.")
+        return rows[0], True
+    except Exception as error:
+        if not _is_unique_constraint_error(error):
+            raise
+
+    existing = _load_user_trade_proposal(auth_header, user_id, normalized_key)
+    if not _manual_order_matches_existing(existing, order_data):
+        raise ValueError("같은 idempotency_key를 다른 주문에 재사용할 수 없습니다.")
+    return existing, False
+
+
 def _insert_trade_proposal_with_schema_fallback(auth_header: str, payload: dict):
     """
     최신 스키마 컬럼이 아직 적용되지 않은 DB에서도 주문 이력 저장이 깨지지 않도록 폴백합니다.
@@ -642,6 +864,68 @@ def _insert_trade_proposal_with_schema_fallback(auth_header: str, payload: dict)
         return query_supabase(auth_header, "trade_proposals", "POST", json_data=legacy_payload)
 
 
+def _recover_order_receipt(
+    auth_header: str,
+    user_id: str,
+    proposal_data: dict,
+) -> bool:
+    """상세 주문 이력 저장 실패 시 상태와 외부 식별자만 최소 복구합니다."""
+    recovery_fields = {
+        "status",
+        "failure_reason",
+        "client_order_id",
+        "external_order_org_no",
+        "external_order_id",
+    }
+    recovery_update = {
+        key: value
+        for key, value in proposal_data.items()
+        if key in recovery_fields
+    }
+    recovery_update["failure_reason"] = (
+        proposal_data.get("failure_reason")
+        or "주문 접수 후 상세 응답 저장에 실패해 기본 주문 식별자만 복구했습니다."
+    )
+    rows = query_supabase(
+        auth_header,
+        "trade_proposals",
+        "PATCH",
+        json_data=recovery_update,
+        params={
+            "id": f"eq.{proposal_data['id']}",
+            "user_id": f"eq.{user_id}",
+        },
+        extra_headers={"Prefer": "return=representation"},
+    ) or []
+    if isinstance(rows, list) and rows:
+        return True
+
+    recovery_insert_fields = {
+        "id",
+        "user_id",
+        "exchange",
+        "asset_type",
+        "ticker",
+        "symbol",
+        "broker_env",
+        "side",
+        "price",
+        "volume",
+        "ord_type",
+        "market_country",
+        "currency",
+        *recovery_fields,
+    }
+    recovery_insert = {
+        key: value
+        for key, value in proposal_data.items()
+        if key in recovery_insert_fields
+    }
+    recovery_insert["failure_reason"] = recovery_update["failure_reason"]
+    _insert_trade_proposal_with_schema_fallback(auth_header, recovery_insert)
+    return True
+
+
 def _is_terminal_order_status(status: str | None) -> bool:
     """
     거래소 주문 상태가 더 이상 정정/취소될 수 없는 상태인지 판단합니다.
@@ -657,6 +941,7 @@ def _is_terminal_order_status(status: str | None) -> bool:
         "REJECTED",
         "FAILED",
         "EXPIRED",
+        "EXPIRED_IN_MATCH",
         "REPLACED",
     }
 
@@ -665,8 +950,10 @@ def _infer_trade_status_from_order_status(order_status: dict | None, fallback: s
     normalized = str((order_status or {}).get("status") or "").upper()
     if normalized in {"CANCELED", "CANCELLED"}:
         return "CANCELED"
-    if normalized in {"REJECTED", "FAILED", "EXPIRED"}:
+    if normalized in {"REJECTED", "FAILED", "EXPIRED", "EXPIRED_IN_MATCH"}:
         return "FAILED"
+    if normalized in {"EXECUTED", "FILLED", "COMPLETED", "DONE"}:
+        return "EXECUTED"
     return fallback
 
 
@@ -1193,8 +1480,8 @@ def _resolve_reference_price(exchange: str, symbol: str, order_type: str, price,
             resolved_price = float(price)
         except (TypeError, ValueError):
             raise ValueError("올바르지 않은 단가 포맷입니다.")
-        if resolved_price <= 0:
-            raise ValueError("주문 단가는 0보다 커야 합니다.")
+        if not math.isfinite(resolved_price) or resolved_price <= 0:
+            raise ValueError("주문 단가는 0보다 큰 유한한 숫자여야 합니다.")
         return resolved_price, "LIMIT_INPUT"
 
     if exchange not in ("TOSS", "KIS", "COINONE", "BINANCE", "BINANCE_UM_FUTURES") or client is None:
@@ -1202,12 +1489,40 @@ def _resolve_reference_price(exchange: str, symbol: str, order_type: str, price,
 
     price_info = client.get_price(symbol)
     resolved_price = float(price_info.get("current_price", 0) or 0)
-    if resolved_price <= 0:
+    if not math.isfinite(resolved_price) or resolved_price <= 0:
         raise ValueError("시장가 검증을 위한 현재가를 확인할 수 없습니다.")
     return resolved_price, "LIVE_PRICE"
 
 
-def _extract_balance_snapshot(client, symbol: str) -> dict:
+def _get_cached_spot_symbol_info(client, symbol: str, symbol_info_cache: dict | None = None) -> dict:
+    normalized = str(symbol or "").strip().upper()
+    if not normalized or client is None or not hasattr(client, "get_spot_symbol_info"):
+        return {}
+    cache = symbol_info_cache if symbol_info_cache is not None else {}
+    if normalized not in cache:
+        cache[normalized] = client.get_spot_symbol_info(normalized) or {}
+    return cache.get(normalized) or {}
+
+
+def _normalize_holding_lookup_symbol(client, exchange: str, symbol: str, symbol_info_cache: dict | None = None) -> str:
+    normalized = str(symbol or "").strip().upper()
+    if str(exchange or "").upper() != "BINANCE":
+        return normalized
+    if client is not None and hasattr(client, "get_spot_symbol_info"):
+        try:
+            symbol_info = _get_cached_spot_symbol_info(client, normalized, symbol_info_cache)
+            base_asset = str((symbol_info or {}).get("base_asset") or "").upper()
+            if base_asset:
+                return base_asset
+        except Exception:
+            pass
+    for quote_asset in BINANCE_SPOT_QUOTE_ASSETS:
+        if normalized.endswith(quote_asset) and len(normalized) > len(quote_asset):
+            return normalized[:-len(quote_asset)]
+    return normalized
+
+
+def _extract_balance_snapshot(client, symbol: str, exchange: str, symbol_info_cache: dict | None = None) -> dict:
     """
     잔고/보유 수량 기반 사전검증에 사용할 값을 정리합니다.
     """
@@ -1243,18 +1558,23 @@ def _extract_balance_snapshot(client, symbol: str) -> dict:
 
     try:
         available_cash = float(available_cash) if available_cash is not None else None
+        if available_cash is not None and not math.isfinite(available_cash):
+            available_cash = None
     except (TypeError, ValueError):
         available_cash = None
 
-    holding_qty = None
+    target_holding_symbol = _normalize_holding_lookup_symbol(client, exchange, symbol, symbol_info_cache)
+    holding_qty = 0.0
     holding_value = None
     for item in balance.get("holdings", []) or []:
         holding_symbol = str(item.get("symbol", "")).upper()
-        if holding_symbol != str(symbol).upper():
+        if holding_symbol != target_holding_symbol:
             continue
         try:
             holding_qty = float(item.get("qty", 0))
             current_price = float(item.get("current_price", 0))
+            if not math.isfinite(holding_qty) or not math.isfinite(current_price):
+                raise ValueError("보유자산 수치가 유한하지 않습니다.")
             holding_value = holding_qty * current_price if current_price > 0 else None
         except (TypeError, ValueError):
             holding_qty = None
@@ -1328,6 +1648,88 @@ def _validate_futures_order_quantity(client, symbol: str, order_type: str, qty: 
     }
 
 
+def _to_positive_decimal(value) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    if not decimal_value.is_finite() or decimal_value <= 0:
+        return None
+    return decimal_value
+
+
+def _floor_decimal_to_step(value: Decimal, step: Decimal) -> Decimal:
+    if step <= 0:
+        return value
+    units = (value / step).to_integral_value(rounding=ROUND_DOWN)
+    return units * step
+
+
+def _build_crypto_quantity_filter(
+    client,
+    exchange: str,
+    symbol: str,
+    order_type: str,
+    symbol_info_cache: dict | None = None,
+) -> dict:
+    if exchange == "COINONE" and hasattr(client, "get_order_quantity_rules"):
+        rules = client.get_order_quantity_rules(symbol) or {}
+        return {
+            "exchange": exchange,
+            "min_qty": rules.get("min_qty"),
+            "max_qty": rules.get("max_qty"),
+            "step_size": rules.get("qty_unit") or rules.get("step_size"),
+            "source": rules.get("source") or "COINONE_ORDER_RULES",
+        }
+    if exchange == "BINANCE" and hasattr(client, "get_spot_symbol_info"):
+        info = _get_cached_spot_symbol_info(client, symbol, symbol_info_cache)
+        is_market = str(order_type or "").upper() == "MARKET"
+        return {
+            "exchange": exchange,
+            "min_qty": info.get("market_min_qty") if is_market else info.get("min_qty"),
+            "max_qty": info.get("market_max_qty") if is_market else info.get("max_qty"),
+            "step_size": info.get("market_step_size") if is_market else info.get("step_size"),
+            "source": "BINANCE_SPOT_LOT_SIZE",
+        }
+    return {"exchange": exchange, "source": "NO_QUANTITY_FILTER"}
+
+
+def _normalize_crypto_order_quantity(
+    client,
+    exchange: str,
+    symbol: str,
+    order_type: str,
+    qty: float,
+    symbol_info_cache: dict | None = None,
+) -> tuple[float, dict]:
+    quantity_filter = _build_crypto_quantity_filter(client, exchange, symbol, order_type, symbol_info_cache)
+    original_qty = _to_positive_decimal(qty)
+    if original_qty is None:
+        raise ValueError("주문 수량은 0보다 큰 유한한 숫자여야 합니다.")
+
+    step_size = _to_positive_decimal(quantity_filter.get("step_size"))
+    normalized_qty = _floor_decimal_to_step(original_qty, step_size) if step_size else original_qty
+    min_qty = _to_positive_decimal(quantity_filter.get("min_qty"))
+    max_qty = _to_positive_decimal(quantity_filter.get("max_qty"))
+
+    if min_qty and normalized_qty < min_qty:
+        raise ValueError(f"{symbol} 최소 주문 수량은 {float(min_qty):g}입니다. 수량을 늘려 다시 시도하세요.")
+    if max_qty and normalized_qty > max_qty:
+        raise ValueError(f"{symbol} 최대 주문 수량은 {float(max_qty):g}입니다. 수량을 {float(max_qty):g} 이하로 낮춰 다시 시도하세요.")
+    if normalized_qty <= 0:
+        raise ValueError("주문 수량이 거래소 주문 단위보다 작습니다. 수량을 늘려 다시 시도하세요.")
+
+    normalized_float = float(normalized_qty)
+    return normalized_float, {
+        **quantity_filter,
+        "original_quantity": float(original_qty),
+        "normalized_quantity": normalized_float,
+        "adjusted": normalized_qty != original_qty,
+    }
+
+
 def _run_binance_order_test(
     client,
     exchange: str,
@@ -1360,6 +1762,17 @@ def _run_binance_order_test(
     return None
 
 
+def _exceeds_real_order_limit(broker_env: str, estimated_amount_krw: float) -> bool:
+    """REAL 주문에만 1회 주문 한도를 적용합니다."""
+    if str(broker_env or "").upper() != "REAL":
+        return False
+    try:
+        amount = float(estimated_amount_krw)
+    except (TypeError, ValueError):
+        return True
+    return not math.isfinite(amount) or amount > REAL_ORDER_LIMIT_KRW
+
+
 def _build_precheck_payload(
     exchange: str,
     symbol: str,
@@ -1380,10 +1793,23 @@ def _build_precheck_payload(
         qty = float(quantity)
     except (TypeError, ValueError):
         raise ValueError("올바르지 않은 주문 수량 포맷입니다.")
-    if qty <= 0:
-        raise ValueError("주문 수량은 0보다 커야 합니다.")
+    if not math.isfinite(qty) or qty <= 0:
+        raise ValueError("주문 수량은 0보다 큰 유한한 숫자여야 합니다.")
+    if exchange in ("TOSS", "KIS") and not float(qty).is_integer():
+        raise ValueError("주식 주문 수량은 현재 정수 단위만 지원합니다. 소수점 또는 금액 주문은 공식 지원 스펙 확인 후 활성화해야 합니다.")
 
     client = _build_exchange_client(exchange, broker_env, record, access_key, secret_key)
+    symbol_info_cache = {}
+    quantity_filter = None
+    if exchange in ("COINONE", "BINANCE"):
+        qty, quantity_filter = _normalize_crypto_order_quantity(
+            client,
+            exchange=exchange,
+            symbol=symbol,
+            order_type=order_type,
+            qty=qty,
+            symbol_info_cache=symbol_info_cache,
+        )
     reference_price, price_source = _resolve_reference_price(exchange, symbol, order_type, price, client)
     normalized_futures_options = None
     if exchange == "BINANCE_UM_FUTURES":
@@ -1398,40 +1824,59 @@ def _build_precheck_payload(
             raise ValueError(f"{symbol} 바이낸스 선물에서 현재 허용되는 최대 레버리지는 {max_leverage}x입니다. 레버리지를 {max_leverage}x 이하로 낮춰 다시 시도하세요.")
         normalized_futures_options["quantity_filter"] = _validate_futures_order_quantity(client, symbol, order_type, qty)
     estimated_amount = reference_price * qty
+    if not math.isfinite(estimated_amount) or estimated_amount <= 0:
+        raise ValueError("예상 주문금액을 유한한 숫자로 계산할 수 없습니다.")
     required_margin = (
         estimated_amount / normalized_futures_options["leverage"]
         if normalized_futures_options
         else estimated_amount
     )
-    estimated_amount_krw = estimated_amount * 1400.0 if exchange in ("BINANCE", "BINANCE_UM_FUTURES") else estimated_amount
-    balance_snapshot = _extract_balance_snapshot(client, symbol)
+    exchange_rate = 1.0
+    if exchange == "TOSS" and determine_market_country(symbol) == "US":
+        exchange_rate = USD_KRW_FALLBACK
+        try:
+            live_exchange_rate = float(client.get_exchange_rate())
+            if math.isfinite(live_exchange_rate) and live_exchange_rate > 0:
+                exchange_rate = live_exchange_rate
+        except Exception:
+            pass
+    elif exchange in ("BINANCE", "BINANCE_UM_FUTURES"):
+        exchange_rate = USD_KRW_FALLBACK
+    estimated_amount_krw = estimated_amount * exchange_rate
+    if not math.isfinite(estimated_amount_krw) or estimated_amount_krw <= 0:
+        raise ValueError("예상 원화 주문금액을 유한한 숫자로 계산할 수 없습니다.")
+    balance_snapshot = _extract_balance_snapshot(client, symbol, exchange, symbol_info_cache)
     available_cash = balance_snapshot["available_cash"]
     holding_qty = balance_snapshot["holding_qty"]
 
-    exceeds_hard_cap = False
+    exceeds_hard_cap = _exceeds_real_order_limit(broker_env, estimated_amount_krw)
     if exchange == "BINANCE_UM_FUTURES":
+        balance_check_failed = (
+            holding_qty is None
+            if normalized_futures_options["reduce_only"]
+            else available_cash is None
+        )
         insufficient_cash = (
-            broker_env == "REAL"
-            and not normalized_futures_options["reduce_only"]
+            not normalized_futures_options["reduce_only"]
             and available_cash is not None
             and required_margin > available_cash
         )
         insufficient_holding = (
-            broker_env == "REAL"
-            and normalized_futures_options["reduce_only"]
+            normalized_futures_options["reduce_only"]
             and holding_qty is not None
             and qty > abs(holding_qty)
         )
     else:
+        balance_check_failed = (
+            available_cash is None if action.upper() == "BUY" else holding_qty is None
+        )
         insufficient_cash = (
             action.upper() == "BUY"
-            and broker_env == "REAL"
             and available_cash is not None
             and required_margin > available_cash
         )
         insufficient_holding = (
             action.upper() == "SELL"
-            and broker_env == "REAL"
             and holding_qty is not None
             and qty > holding_qty
         )
@@ -1480,6 +1925,8 @@ def _build_precheck_payload(
     warnings = []
     if is_market_closed:
         warnings.append(market_status_message)
+    if exceeds_hard_cap:
+        warnings.append("실거래 1회 주문 한도 100,000원을 초과했습니다.")
 
     insufficient_permission = False
     permission_message = ""
@@ -1530,10 +1977,12 @@ def _build_precheck_payload(
         "asset_type": asset_type,
         "currency": currency,
         "quantity": qty,
+        "quantity_filter": quantity_filter,
         "reference_price": reference_price,
         "price_source": price_source,
         "estimated_amount": estimated_amount,
         "estimated_amount_krw": estimated_amount_krw,
+        "exchange_rate": exchange_rate,
         "required_margin": required_margin,
         "futures_options": normalized_futures_options,
         "real_order_limit_krw": REAL_ORDER_LIMIT_KRW,
@@ -1544,6 +1993,7 @@ def _build_precheck_payload(
         "available_cash": available_cash,
         "holding_qty": holding_qty,
         "holding_value": balance_snapshot["holding_value"],
+        "balance_check_failed": balance_check_failed,
         "insufficient_cash": insufficient_cash,
         "insufficient_holding": insufficient_holding,
         "exchange_order_test": exchange_order_test,
@@ -1587,6 +2037,11 @@ def precheck_manual_order():
         return jsonify({"success": False, "message": "올바르지 않은 주문 유형(order_type)입니다."}), 400
     if exchange == "COINONE" and order_type.upper() != "LIMIT":
         return jsonify({"success": False, "message": "코인원 주문 사전검증은 현재 지정가(LIMIT)만 지원합니다."}), 400
+    if broker_env == "REAL" and order_type.upper() == "MARKET":
+        return jsonify({
+            "success": False,
+            "message": "실거래 시장가 주문은 100,000원 하드캡을 보장할 수 없어 지원하지 않습니다. 지정가를 입력해 주세요.",
+        }), 400
 
     try:
         record, access_key, secret_key = _load_user_exchange_record(auth_header, user_id, exchange, broker_env)
@@ -1610,7 +2065,7 @@ def precheck_manual_order():
         )
         return jsonify({"success": True, "data": payload})
     except ValueError as e:
-        return jsonify({"success": False, "message": str(e)}), 400
+        return jsonify({"success": False, "message": _format_user_value_error_message(e)}), 400
     except Exception as e:
         return jsonify(format_error_payload(e, "주문 사전검증 실패", exchange=exchange)), 500
 
@@ -1662,18 +2117,62 @@ def place_manual_order():
         return jsonify({"success": False, "message": "올바르지 않은 주문 유형(order_type)입니다."}), 400
     if exchange == "COINONE" and order_type.upper() != "LIMIT":
         return jsonify({"success": False, "message": "코인원 주문은 현재 지정가(LIMIT)만 지원합니다."}), 400
+    if broker_env == "REAL" and order_type.upper() == "MARKET":
+        return jsonify({
+            "success": False,
+            "message": "실거래 시장가 주문은 100,000원 하드캡을 보장할 수 없어 지원하지 않습니다. 지정가를 입력해 주세요.",
+        }), 400
 
     try:
         qty = float(quantity)
-        if qty <= 0:
-            return jsonify({"success": False, "message": "주문 수량은 0보다 커야 합니다."}), 400
-    except ValueError:
+        if not math.isfinite(qty) or qty <= 0:
+            return jsonify({"success": False, "message": "주문 수량은 0보다 큰 유한한 숫자여야 합니다."}), 400
+    except (TypeError, ValueError):
         return jsonify({"success": False, "message": "올바르지 않은 주문 수량 포맷입니다."}), 400
+
+    auto_exit_value = data.get("auto_exit", False)
+    if isinstance(auto_exit_value, bool):
+        auto_exit = auto_exit_value
+    elif str(auto_exit_value).strip().lower() in {"true", "1"}:
+        auto_exit = True
+    elif str(auto_exit_value).strip().lower() in {"false", "0", "", "none"}:
+        auto_exit = False
+    else:
+        return jsonify({"success": False, "message": "자동감시 사용 여부는 true 또는 false로 입력해 주세요."}), 400
+
+    target_profit_rate = 5.0
+    stop_loss_rate = -3.0
+    if auto_exit and action.upper() == "BUY":
+        try:
+            target_profit_rate = float(data.get("target_profit_rate", 5.0))
+            stop_loss_rate = float(data.get("stop_loss_rate", -3.0))
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "message": "익절·손절 비율은 유한한 숫자로 입력해 주세요."}), 400
+        if not math.isfinite(target_profit_rate) or not math.isfinite(stop_loss_rate):
+            return jsonify({"success": False, "message": "익절·손절 비율은 유한한 숫자로 입력해 주세요."}), 400
+
+    auto_exit_execution_mode = str(
+        data.get("auto_exit_execution_mode") or "PROPOSAL"
+    ).upper()
+    if auto_exit_execution_mode not in ("PROPOSAL", "AUTO"):
+        auto_exit_execution_mode = "PROPOSAL"
+    auto_restart_value = data.get("auto_restart_on_partial_fill", True)
+    if isinstance(auto_restart_value, bool):
+        auto_restart_on_partial_fill = auto_restart_value
+    elif str(auto_restart_value).strip().casefold() in {"true", "1"}:
+        auto_restart_on_partial_fill = True
+    elif str(auto_restart_value).strip().casefold() in {"false", "0"}:
+        auto_restart_on_partial_fill = False
+    else:
+        return jsonify({
+            "success": False,
+            "message": "부분체결 후 자동 재시작 여부는 true 또는 false로 입력해 주세요.",
+        }), 400
 
     try:
         record, access_key, secret_key = _load_user_exchange_record(auth_header, user_id, exchange, broker_env)
     except ValueError as e:
-        return jsonify({"success": False, "message": str(e)}), 400
+        return jsonify({"success": False, "message": _format_user_value_error_message(e)}), 400
     except Exception as e:
         return jsonify(format_error_payload(e, "API 크리덴셜 로드 및 복호화 실패", exchange=exchange)), 500
 
@@ -1698,13 +2197,27 @@ def place_manual_order():
             } if exchange == "BINANCE_UM_FUTURES" else None,
         )
     except ValueError as e:
-        return jsonify({"success": False, "message": str(e)}), 400
+        return jsonify({"success": False, "message": _format_user_value_error_message(e)}), 400
     except Exception as e:
         return jsonify(format_error_payload(e, "주문 사전검증 실패", exchange=exchange)), 500
 
     order_price = precheck["reference_price"]
     total_amount = precheck["estimated_amount"]
-    total_amount_krw = precheck["estimated_amount_krw"]
+    normalized_precheck_qty = precheck.get("quantity")
+    if normalized_precheck_qty not in (None, ""):
+        try:
+            normalized_precheck_qty = float(normalized_precheck_qty)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "message": "사전검증 수량 포맷이 올바르지 않습니다."}), 400
+        if not math.isfinite(normalized_precheck_qty) or normalized_precheck_qty <= 0:
+            return jsonify({"success": False, "message": "사전검증 수량은 0보다 큰 유한한 숫자여야 합니다."}), 400
+        qty = normalized_precheck_qty
+
+    if precheck.get("exceeds_real_order_limit"):
+        return jsonify({
+            "success": False,
+            "message": "실거래 1회 주문 한도 100,000원을 초과했습니다. 수량 또는 가격을 낮춰 주세요.",
+        }), 400
 
     if precheck.get("is_market_closed"):
         return jsonify({"success": False, "message": precheck.get("market_status_message") or "현재는 거래가 불가능한 시간(또는 휴장일)입니다."}), 400
@@ -1727,8 +2240,91 @@ def place_manual_order():
     if precheck["insufficient_holding"]:
         return jsonify({"success": False, "message": "보유 수량을 초과하는 매도 주문입니다."}), 400
 
+    if precheck.get("balance_check_failed"):
+        return jsonify({
+            "success": False,
+            "message": "주문에 필요한 잔고 또는 보유수량을 확인하지 못했습니다. 계좌 연결 상태를 확인해 주세요.",
+        }), 400
+
+    if not approval_proposal:
+        try:
+            manual_idempotency_key = _normalize_manual_order_idempotency_key(
+                data.get("idempotency_key")
+                or request.headers.get("Idempotency-Key")
+            )
+        except ValueError as error:
+            return jsonify({"success": False, "message": str(error)}), 400
+
+        manual_order_data = {
+            "exchange": exchange,
+            "symbol": symbol,
+            "action": action,
+            "order_type": order_type,
+            "broker_env": broker_env,
+            "quantity": qty,
+            "price": order_price,
+            "auto_exit": auto_exit,
+            "target_profit_rate": target_profit_rate if auto_exit else None,
+            "stop_loss_rate": stop_loss_rate if auto_exit else None,
+            "auto_exit_execution_mode": auto_exit_execution_mode,
+            "auto_restart_on_partial_fill": (
+                auto_restart_on_partial_fill if auto_exit else False
+            ),
+            **(precheck.get("futures_options") or {}),
+        }
+        try:
+            manual_proposal, was_created = _create_or_load_manual_order_proposal(
+                auth_header,
+                user_id,
+                manual_idempotency_key,
+                manual_order_data,
+            )
+        except ValueError as error:
+            return jsonify({
+                "success": False,
+                "message": str(error),
+                "error": {
+                    "title": "멱등성 키 재사용 충돌",
+                    "message": str(error),
+                    "action": "주문 조건별로 새 UUID 키를 생성해 다시 요청해 주세요.",
+                    "code": "IDEMPOTENCY_KEY_REUSED",
+                    "raw_message": "",
+                },
+            }), 409
+        except Exception as error:
+            return jsonify(format_error_payload(
+                error,
+                "수동 주문 멱등성 레코드 생성 실패",
+                exchange=exchange,
+            )), 500
+
+        if not was_created and str(manual_proposal.get("status") or "").upper() != "PENDING":
+            return jsonify({
+                "success": False,
+                "message": "같은 수동 주문이 이미 전송 중이거나 처리되었습니다.",
+                "error": {
+                    "title": "중복 주문 전송 차단",
+                    "message": "동일한 idempotency_key의 주문 이력이 존재합니다.",
+                    "action": "같은 주문을 다시 보내지 말고 거래내역과 거래소 주문 상태를 확인해 주세요.",
+                    "code": "MANUAL_ORDER_ALREADY_SUBMITTED",
+                    "raw_message": "",
+                },
+                "order_id": manual_proposal.get("external_order_id"),
+                "status": manual_proposal.get("status"),
+            }), 409
+        approval_proposal = manual_proposal
+
     if approval_proposal:
-        _patch_trade_proposal(auth_header, approval_proposal["id"], {"status": "APPROVED"})
+        claimed = _claim_trade_proposal_for_execution(
+            auth_header,
+            approval_proposal["id"],
+        )
+        if not claimed:
+            return jsonify({
+                "success": False,
+                "message": "이미 승인·거절·실행 중인 매매 제안입니다. 거래내역을 새로고침해 상태를 확인하세요.",
+            }), 409
+        approval_proposal = claimed
 
     # 4. 주문 실행
     client = None
@@ -1783,38 +2379,125 @@ def place_manual_order():
         return jsonify(format_error_payload(e, "주문 전송 실패", exchange=exchange)), 500
 
     # 5. 주문 체결 성공 후 자동 감시(Stop-loss, Take-profit) 바인딩
-    order_status_for_db = "EXECUTED" if _is_terminal_order_status(order_res.get("status")) else "APPROVED"
-    if exchange == "KIS":
-        order_status_for_db, kis_status_detail = _resolve_kis_submission_status(
-            client,
-            symbol=symbol,
-            side=action,
-            qty=qty,
-            previous_holding_qty=precheck.get("holding_qty"),
-            order_res=order_res,
-        )
-        order_res = {
-            **order_res,
-            "post_order_status_check": kis_status_detail,
-        }
+    if not isinstance(order_res, dict):
+        current_app.logger.error("거래소 주문 응답 형식이 올바르지 않습니다: exchange=%s", exchange)
+        order_res = {"status": "UNKNOWN", "raw": None}
 
     proposal_id = str(approval_proposal["id"] if approval_proposal else uuid.uuid4())
+    initial_order_status = _infer_trade_status_from_order_status(
+        order_res,
+        fallback="APPROVED",
+    )
+    initial_receipt = {
+        "id": proposal_id,
+        "user_id": user_id,
+        "exchange": exchange,
+        "asset_type": "STOCK" if exchange in ("TOSS", "KIS") else "CRYPTO",
+        "ticker": symbol,
+        "symbol": symbol,
+        "broker_env": broker_env,
+        "side": action.upper(),
+        "price": order_price,
+        "volume": qty,
+        "ord_type": order_type.upper(),
+        "client_order_id": order_res.get("client_order_id"),
+        "external_order_org_no": order_res.get("order_org_no"),
+        "external_order_id": order_res.get("order_id"),
+        "status": initial_order_status,
+        "raw_order_payload": {"order": order_res.get("raw")},
+    }
+    try:
+        _patch_trade_proposal_returning(
+            auth_header,
+            user_id,
+            proposal_id,
+            initial_receipt,
+        )
+    except Exception:
+        current_app.logger.exception(
+            "외부 주문 직후 영수증 저장 실패: proposal_id=%s order_id=%s exchange=%s",
+            proposal_id,
+            order_res.get("order_id"),
+            exchange,
+        )
+        try:
+            if not _recover_order_receipt(auth_header, user_id, initial_receipt):
+                raise RuntimeError("주문 영수증 최소 복구가 반영되지 않았습니다.")
+        except Exception:
+            current_app.logger.exception(
+                "외부 주문 직후 영수증 복구 실패: proposal_id=%s order_id=%s exchange=%s",
+                proposal_id,
+                order_res.get("order_id"),
+                exchange,
+            )
+            return jsonify({
+                "success": False,
+                "message": "거래소 주문이 접수되었을 수 있으나 주문 식별자를 저장하지 못했습니다.",
+                "error": {
+                    "title": "주문 상태 확인 필요",
+                    "message": "외부 주문 직후 거래내역 영수증 저장을 확인하지 못했습니다.",
+                    "action": "같은 주문을 다시 전송하지 말고 거래소 주문내역을 먼저 확인한 뒤 관리자에게 문의해 주세요.",
+                    "code": "ORDER_RECEIPT_PERSIST_FAILED",
+                    "raw_message": "",
+                },
+                "order_id": order_res.get("order_id"),
+                "status": order_res.get("status"),
+            }), 503
+
+    try:
+        order_status_for_db = _infer_trade_status_from_order_status(
+            order_res,
+            fallback="APPROVED",
+        )
+        if exchange == "KIS":
+            order_status_for_db, kis_status_detail = _resolve_kis_submission_status(
+                client,
+                symbol=symbol,
+                side=action,
+                qty=qty,
+                previous_holding_qty=precheck.get("holding_qty"),
+                order_res=order_res,
+            )
+            order_res = {
+                **order_res,
+                "post_order_status_check": kis_status_detail,
+            }
+    except Exception:
+        current_app.logger.exception(
+            "주문 접수 후 상태 확인 실패: exchange=%s symbol=%s broker_env=%s",
+            exchange,
+            symbol,
+            broker_env,
+        )
+        order_status_for_db = "APPROVED"
+        order_res = {
+            **order_res,
+            "post_order_status_check": {
+                "status": "UNKNOWN",
+                "message": "주문은 접수되었으며 상태 동기화가 필요합니다.",
+            },
+        }
+
     auto_exit_result = None
-    auto_exit = data.get("auto_exit", False)
-    if auto_exit and action.upper() == "BUY":
-        target_profit_rate = float(data.get("target_profit_rate", 5.0))
-        stop_loss_rate = float(data.get("stop_loss_rate", -3.0))
-        execution_mode = str(data.get("auto_exit_execution_mode") or "PROPOSAL").upper()
-        if execution_mode not in ("PROPOSAL", "AUTO"):
-            execution_mode = "PROPOSAL"
+    if (
+        auto_exit
+        and action.upper() == "BUY"
+        and order_status_for_db not in {"FAILED", "CANCELED"}
+    ):
+        execution_mode = auto_exit_execution_mode
         
         # asset_type 및 market_country 판정
         asset_type = "STOCK" if exchange in ("TOSS", "KIS") else "CRYPTO"
         market_country = None
         if asset_type == "STOCK":
-            market_country = determine_market_country(symbol)
-
-        auto_restart_on_partial_fill = data.get("auto_restart_on_partial_fill", True)
+            try:
+                market_country = determine_market_country(symbol)
+            except Exception:
+                current_app.logger.exception(
+                    "주문 접수 후 시장 구분 실패: exchange=%s symbol=%s",
+                    exchange,
+                    symbol,
+                )
 
         try:
             rule_data = {
@@ -1861,52 +2544,124 @@ def place_manual_order():
             current_app.logger.warning("자동감시 조건 등록 실패: %s", e)
             auto_exit_result = "감시 조건 등록 실패 - 주문은 접수되었지만 익절/손절 감시 규칙은 저장되지 않았습니다."
 
-    # 6. 주문 이력 trade_proposals에 EXECUTED 상태로 등록 (수동 거래 히스토리 기록용)
-    try:
-        asset_type = "STOCK" if exchange in ("TOSS", "KIS") else "CRYPTO"
-        market_country = None
-        if asset_type == "STOCK":
+    # 6. 주문 이력 trade_proposals에 주문 접수 결과를 저장합니다.
+    asset_type = "STOCK" if exchange in ("TOSS", "KIS") else "CRYPTO"
+    market_country = None
+    if asset_type == "STOCK":
+        try:
             market_country = determine_market_country(symbol)
-        currency = "KRW" if (exchange not in ("BINANCE", "BINANCE_UM_FUTURES") and market_country != "US") else "USD"
-        
-        proposal_data = {
-            "id": proposal_id,
-            "user_id": user_id,
-            "exchange": exchange,
-            "asset_type": asset_type,
-            "ticker": symbol,
-            "symbol": symbol,
-            "broker_env": broker_env,
-            "side": action.upper(),
-            "price": order_price,
-            "volume": qty,
-            "ord_type": order_type.upper(),
-            "market_country": market_country,
-            "currency": currency,
-            "client_order_id": order_res.get("client_order_id"),
-            "external_order_org_no": order_res.get("order_org_no"),
-            "external_order_id": order_res.get("order_id"),
-            "raw_order_payload": {
-                "order": order_res.get("raw"),
-                "post_order_status_check": order_res.get("post_order_status_check"),
-            },
-            "status": order_status_for_db
-        }
+        except Exception:
+            current_app.logger.exception(
+                "주문 이력 시장 구분 실패: exchange=%s symbol=%s",
+                exchange,
+                symbol,
+            )
+    currency = "KRW" if (exchange not in ("BINANCE", "BINANCE_UM_FUTURES") and market_country != "US") else "USD"
+    proposal_data = {
+        "id": proposal_id,
+        "user_id": user_id,
+        "exchange": exchange,
+        "asset_type": asset_type,
+        "ticker": symbol,
+        "symbol": symbol,
+        "broker_env": broker_env,
+        "side": action.upper(),
+        "price": order_price,
+        "volume": qty,
+        "ord_type": order_type.upper(),
+        "market_country": market_country,
+        "currency": currency,
+        "client_order_id": order_res.get("client_order_id"),
+        "external_order_org_no": order_res.get("order_org_no"),
+        "external_order_id": order_res.get("order_id"),
+        "raw_order_payload": {
+            "order": order_res.get("raw"),
+            "post_order_status_check": order_res.get("post_order_status_check"),
+        },
+        "status": order_status_for_db,
+    }
+    if order_status_for_db in {"FAILED", "CANCELED"}:
+        proposal_data["failure_reason"] = "거래소가 주문을 실패 또는 취소 상태로 반환했습니다."
+
+    order_history_recovered = False
+    order_history_persist_failed = False
+    try:
         if approval_proposal:
-            _patch_trade_proposal(auth_header, proposal_id, proposal_data)
+            _patch_trade_proposal_returning(
+                auth_header,
+                user_id,
+                proposal_id,
+                proposal_data,
+            )
         else:
             _insert_trade_proposal_with_schema_fallback(auth_header, proposal_data)
-    except Exception as e:
-        current_app.logger.error(f"주문 이력 기록 실패: {str(e)}")
+    except Exception:
+        current_app.logger.exception(
+            "주문 이력 상세 저장 실패: proposal_id=%s order_id=%s exchange=%s",
+            proposal_id,
+            order_res.get("order_id"),
+            exchange,
+        )
+        try:
+            order_history_recovered = _recover_order_receipt(
+                auth_header,
+                user_id,
+                proposal_data,
+            )
+            if not order_history_recovered:
+                order_history_persist_failed = True
+        except Exception:
+            order_history_persist_failed = True
+            current_app.logger.exception(
+                "주문 이력 최소 복구 실패: proposal_id=%s order_id=%s exchange=%s",
+                proposal_id,
+                order_res.get("order_id"),
+                exchange,
+            )
 
-    return jsonify({
+    if order_history_persist_failed:
+        return jsonify({
+            "success": False,
+            "message": "거래소 주문이 접수되었을 수 있으나 주문 이력 저장을 확인하지 못했습니다.",
+            "error": {
+                "title": "주문 상태 확인 필요",
+                "message": "외부 주문 식별자를 거래내역에 저장하지 못했습니다.",
+                "action": "같은 주문을 다시 전송하지 말고 거래소 주문내역을 먼저 확인한 뒤 관리자에게 문의해 주세요.",
+                "code": "ORDER_RECEIPT_PERSIST_FAILED",
+                "raw_message": "",
+            },
+            "order_id": order_res.get("order_id"),
+            "status": order_res.get("status"),
+        }), 503
+
+    response_success = order_status_for_db not in {"FAILED", "CANCELED"}
+    if not response_success:
+        return jsonify({
+            "success": False,
+            "message": "거래소가 주문을 접수하지 않았거나 즉시 취소했습니다.",
+            "error": {
+                "title": "주문 미접수 또는 취소",
+                "message": "거래소가 실패·거절·취소 상태를 반환했습니다.",
+                "action": "같은 주문을 바로 다시 보내지 말고 거래내역과 거래소 주문 상태를 확인한 뒤 주문 조건을 수정해 주세요.",
+                "code": "ORDER_NOT_ACCEPTED",
+                "raw_message": str(order_res.get("status") or "")[:64],
+            },
+            "order_id": order_res.get("order_id"),
+            "status": order_res.get("status"),
+            "auto_exit": auto_exit_result,
+        }), 409
+    response_payload = {
         "success": True,
-        "message": "주문이 성공적으로 전송되었습니다.",
+        "message": (
+            "주문이 전송되었고 기본 주문 식별자만 복구했습니다. 거래내역 동기화를 확인해 주세요."
+            if order_history_recovered
+            else "주문이 성공적으로 전송되었습니다."
+        ),
         "order_id": order_res.get("order_id"),
         "status": order_res.get("status"),
         "auto_exit": auto_exit_result,
-        "detail": order_res
-    })
+    }
+    return jsonify(response_payload)
 
 
 @trade_bp.route("/api/trade/proposal/approve", methods=["POST"])
@@ -1927,10 +2682,12 @@ def reject_trade_proposal():
         proposal_id = str((request.json or {}).get("proposal_id") or "").strip()
         if not proposal_id:
             return jsonify({"success": False, "message": "proposal_id가 필요합니다."}), 400
-        proposal = _load_user_trade_proposal(auth_header, user_id, proposal_id)
-        if str(proposal.get("status") or "").upper() != "PENDING":
-            return jsonify({"success": False, "message": "대기 중인 매매 제안만 거절할 수 있습니다."}), 409
-        updated = _patch_trade_proposal(auth_header, proposal_id, {"status": "REJECTED"})
+        updated = _reject_pending_trade_proposal(auth_header, user_id, proposal_id)
+        if not updated:
+            return jsonify({
+                "success": False,
+                "message": "이미 승인·거절·실행 중이거나 찾을 수 없는 매매 제안입니다.",
+            }), 409
         return jsonify({"success": True, "data": updated, "message": "매매 제안을 거절했습니다."})
     except ValueError as error:
         return jsonify({"success": False, "message": str(error)}), 400

@@ -3,8 +3,20 @@ import test from 'node:test'
 
 import {
   buildProposalPrecheckSummary,
+  isChatbotApprovalProposal,
   isProposalApprovalBlocked,
 } from './chatbotProposalPrecheck.js'
+
+test('수동 주문 멱등성 레코드는 챗봇 승인 카드에서 제외한다', () => {
+  assert.equal(isChatbotApprovalProposal({
+    status: 'PENDING',
+    raw_order_payload: { source: 'MANUAL_ORDER' },
+  }), false)
+  assert.equal(isChatbotApprovalProposal({
+    status: 'PENDING',
+    raw_order_payload: { source: 'CHATBOT' },
+  }), true)
+})
 
 test('builds compact precheck summary from raw_order_payload', () => {
   const summary = buildProposalPrecheckSummary({

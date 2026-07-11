@@ -8,6 +8,7 @@ import { buildDisclosurePresentation } from './chatbotDisclosurePresentation'
 import { shouldSubmitChatbotInput } from './chatbotInput'
 import {
   buildProposalPrecheckSummary,
+  isChatbotApprovalProposal,
   isProposalApprovalBlocked,
 } from './chatbotProposalPrecheck'
 import { getDefaultChatbotSize, resizeChatbotPanel } from './chatbotResize'
@@ -355,7 +356,7 @@ export default function ChatbotWidget({ enabled = true, isLoggedIn = false }) {
         .limit(10)
 
       if (!error && active) {
-        const proposals = [...(data || [])].reverse().map((proposal) => ({
+        const proposals = [...(data || [])].reverse().filter(isChatbotApprovalProposal).map((proposal) => ({
           ...proposal,
           timelineOrder: ++timelineOrderSequenceRef.current,
         }))
@@ -376,6 +377,10 @@ export default function ChatbotWidget({ enabled = true, isLoggedIn = false }) {
             if (!active) return
             if (payload.eventType === 'DELETE') {
               setPendingProposals((items) => items.filter((item) => item.id !== payload.old?.id))
+              return
+            }
+            if (!isChatbotApprovalProposal(payload.new)) {
+              setPendingProposals((items) => items.filter((item) => item.id !== payload.new?.id))
               return
             }
             setPendingProposals((items) => {

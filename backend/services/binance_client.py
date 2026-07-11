@@ -5,6 +5,7 @@ import requests
 from urllib.parse import urlencode
 
 _FUTURES_EXCHANGE_INFO_CACHE = {}
+_SPOT_SYMBOL_INFO_CACHE = {}
 _BINANCE_TIME_SYNC_TTL_SECONDS = 300
 
 
@@ -153,6 +154,47 @@ class BinanceSpotClient:
             "currency": "USDT",
             "raw": data,
         }
+
+    def get_spot_symbol_info(self, symbol: str) -> dict:
+        """현물 주문 심볼의 기준자산과 결제자산 메타데이터를 반환합니다."""
+        normalized_symbol = _normalize_spot_symbol(symbol)
+        if not normalized_symbol:
+            raise ValueError("바이낸스 심볼 메타데이터 조회를 위한 심볼이 비어 있습니다.")
+        cache_key = (self.base_url, normalized_symbol)
+        cached = _SPOT_SYMBOL_INFO_CACHE.get(cache_key)
+        if cached:
+            return dict(cached)
+
+        response = requests.get(
+            f"{self.base_url}/api/v3/exchangeInfo",
+            params={"symbol": normalized_symbol},
+            timeout=5,
+        )
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"바이낸스 심볼 메타데이터 조회 실패: HTTP {response.status_code}"
+            )
+        rows = (response.json() or {}).get("symbols") or []
+        row = next(
+            (
+                item
+                for item in rows
+                if str(item.get("symbol") or "").upper() == normalized_symbol
+            ),
+            None,
+        )
+        base_asset = str((row or {}).get("baseAsset") or "").upper()
+        quote_asset = str((row or {}).get("quoteAsset") or "").upper()
+        if not base_asset or not quote_asset:
+            raise RuntimeError("바이낸스 심볼 메타데이터에 기준자산 정보가 없습니다.")
+
+        result = {
+            "symbol": normalized_symbol,
+            "base_asset": base_asset,
+            "quote_asset": quote_asset,
+        }
+        _SPOT_SYMBOL_INFO_CACHE[cache_key] = result
+        return dict(result)
 
     def get_balance(self) -> dict:
         """

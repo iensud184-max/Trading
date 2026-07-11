@@ -410,6 +410,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
   const lastCandleSignatureRef = useRef('')
   const orderbookTradesInFlightRef = useRef(false)
   const candlesInFlightRef = useRef(false)
+  const manualOrderIdempotencyRef = useRef(null)
 
   const isIntradayInterval = !['1d', '1w', '1M'].includes(chartInterval)
   const effectiveOrderPrice = orderType === 'LIMIT' ? Number(price || 0) : currentPrice
@@ -2599,18 +2600,31 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
         leverage: exchange === 'BINANCE_UM_FUTURES' ? Number(futuresLeverage) : null,
         margin_type: exchange === 'BINANCE_UM_FUTURES' ? futuresMarginType : null
       }
+      const orderFingerprint = JSON.stringify(payload)
+      if (manualOrderIdempotencyRef.current?.fingerprint !== orderFingerprint) {
+        manualOrderIdempotencyRef.current = {
+          fingerprint: orderFingerprint,
+          key: crypto.randomUUID(),
+        }
+      }
+      const idempotencyKey = manualOrderIdempotencyRef.current.key
+      payload.idempotency_key = idempotencyKey
 
       const response = await fetch(`${API_BASE_URL}/api/trade/order`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': authHeader
+          'Authorization': authHeader,
+          'Idempotency-Key': idempotencyKey
         },
         body: JSON.stringify(payload)
       })
 
       const resData = await response.json()
 
+      if (resData.success || resData.error?.code === 'ORDER_NOT_ACCEPTED') {
+        manualOrderIdempotencyRef.current = null
+      }
       if (resData.success) {
         const autoExitMessage = resData.auto_exit ? ` / ${resData.auto_exit}` : ''
         setTradeMessage({

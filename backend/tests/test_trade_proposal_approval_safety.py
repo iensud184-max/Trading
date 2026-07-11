@@ -2,10 +2,16 @@ import pytest
 
 from backend.app import app
 from backend.routes import trade
+from backend.services import binance_client as binance_module
+from backend.services.binance_client import BinanceClient
 from backend.routes.trade import (
     _claim_trade_proposal_for_execution,
+    _create_or_load_manual_order_proposal,
     _exceeds_real_order_limit,
 )
+
+
+MANUAL_ORDER_KEY = "11111111-1111-4111-8111-111111111111"
 
 
 def _safe_precheck(**overrides):
@@ -65,13 +71,16 @@ class BalanceOrderClient(FakeOrderClient):
         available_cash=1000.0,
         holding_qty=2.0,
         holding_symbol="XRP",
+        base_asset=None,
         fail_balance=False,
     ):
         super().__init__()
         self.available_cash = available_cash
         self.holding_qty = holding_qty
         self.holding_symbol = holding_symbol
+        self.base_asset = base_asset
         self.fail_balance = fail_balance
+        self.symbol_info_calls = []
 
     def get_balance(self):
         if self.fail_balance:
@@ -85,6 +94,14 @@ class BalanceOrderClient(FakeOrderClient):
 
     def test_order(self, **kwargs):
         return {"success": True}
+
+    def get_spot_symbol_info(self, symbol):
+        self.symbol_info_calls.append(symbol)
+        return {
+            "symbol": symbol,
+            "base_asset": self.base_asset or self.holding_symbol,
+            "quote_asset": "EUR",
+        }
 
 
 def test_real_order_limit_applies_only_to_real_orders():
@@ -112,6 +129,175 @@ def test_claim_trade_proposal_returns_none_after_first_claim(monkeypatch):
 
     assert _claim_trade_proposal_for_execution("Bearer test", "proposal-1")["status"] == "APPROVED"
     assert _claim_trade_proposal_for_execution("Bearer test", "proposal-1") is None
+
+
+def test_manual_order_idempotency_creates_pending_proposal_before_execution(monkeypatch):
+    calls = []
+
+    def fake_query(
+        auth_header,
+        endpoint,
+        method="GET",
+        json_data=None,
+        params=None,
+        extra_headers=None,
+    ):
+        calls.append((endpoint, method, json_data, extra_headers))
+        return [{**json_data}]
+
+    monkeypatch.setattr(trade, "query_supabase", fake_query)
+
+    proposal, created = _create_or_load_manual_order_proposal(
+        "Bearer test",
+        "user-1",
+        MANUAL_ORDER_KEY,
+        {
+            "exchange": "COINONE",
+            "symbol": "XRP",
+            "action": "BUY",
+            "order_type": "LIMIT",
+            "broker_env": "MOCK",
+            "quantity": 10,
+            "price": 800,
+        },
+    )
+
+    assert created is True
+    assert proposal["id"] == MANUAL_ORDER_KEY
+    assert proposal["status"] == "PENDING"
+    assert calls[0][0:2] == ("trade_proposals", "POST")
+    assert calls[0][3] == {"Prefer": "return=representation"}
+
+
+def test_manual_order_duplicate_loads_existing_proposal_without_new_insert(monkeypatch):
+    existing = {
+        "id": MANUAL_ORDER_KEY,
+        "user_id": "user-1",
+        "exchange": "COINONE",
+        "symbol": "XRP",
+        "side": "BUY",
+        "ord_type": "LIMIT",
+        "broker_env": "MOCK",
+        "volume": "10",
+        "price": "800",
+        "status": "APPROVED",
+    }
+
+    def fake_query(*args, **kwargs):
+        raise RuntimeError("duplicate key value violates unique constraint (23505)")
+
+    monkeypatch.setattr(trade, "query_supabase", fake_query)
+    monkeypatch.setattr(trade, "_load_user_trade_proposal", lambda *args: existing)
+
+    proposal, created = _create_or_load_manual_order_proposal(
+        "Bearer test",
+        "user-1",
+        MANUAL_ORDER_KEY,
+        {
+            "exchange": "COINONE",
+            "symbol": "XRP",
+            "action": "BUY",
+            "order_type": "LIMIT",
+            "broker_env": "MOCK",
+            "quantity": 10,
+            "price": 800,
+        },
+    )
+
+    assert created is False
+    assert proposal is existing
+
+
+def test_manual_order_duplicate_rejects_idempotency_key_reuse_for_different_order(monkeypatch):
+    existing = {
+        "id": MANUAL_ORDER_KEY,
+        "user_id": "user-1",
+        "exchange": "COINONE",
+        "symbol": "XRP",
+        "side": "BUY",
+        "ord_type": "LIMIT",
+        "broker_env": "MOCK",
+        "volume": "9",
+        "price": "800",
+        "status": "PENDING",
+    }
+    monkeypatch.setattr(
+        trade,
+        "query_supabase",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("duplicate key value violates unique constraint (23505)")
+        ),
+    )
+    monkeypatch.setattr(trade, "_load_user_trade_proposal", lambda *args: existing)
+
+    with pytest.raises(ValueError, match="다른 주문"):
+        _create_or_load_manual_order_proposal(
+            "Bearer test",
+            "user-1",
+            MANUAL_ORDER_KEY,
+            {
+                "exchange": "COINONE",
+                "symbol": "XRP",
+                "action": "BUY",
+                "order_type": "LIMIT",
+                "broker_env": "MOCK",
+                "quantity": 10,
+                "price": 800,
+            },
+        )
+
+
+def test_manual_order_duplicate_rejects_changed_futures_execution_options(monkeypatch):
+    created_rows = []
+
+    def create_query(
+        auth_header,
+        endpoint,
+        method="GET",
+        json_data=None,
+        params=None,
+        extra_headers=None,
+    ):
+        created_rows.append({**json_data})
+        return [{**json_data}]
+
+    monkeypatch.setattr(trade, "query_supabase", create_query)
+    original = {
+        "exchange": "BINANCE_UM_FUTURES",
+        "symbol": "BTCUSDT",
+        "action": "SELL",
+        "order_type": "LIMIT",
+        "broker_env": "MOCK",
+        "quantity": 0.01,
+        "price": 50000,
+        "position_side": "BOTH",
+        "reduce_only": True,
+        "leverage": 3,
+        "margin_type": "ISOLATED",
+    }
+    _create_or_load_manual_order_proposal(
+        "Bearer test",
+        "user-1",
+        MANUAL_ORDER_KEY,
+        original,
+    )
+
+    monkeypatch.setattr(
+        trade,
+        "query_supabase",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("duplicate key value violates unique constraint (23505)")
+        ),
+    )
+    monkeypatch.setattr(trade, "_load_user_trade_proposal", lambda *args: created_rows[0])
+
+    with pytest.raises(ValueError, match="다른 주문"):
+        _create_or_load_manual_order_proposal(
+            "Bearer test",
+            "user-1",
+            MANUAL_ORDER_KEY,
+            {**original, "reduce_only": False},
+        )
 
 
 def test_reject_pending_proposal_uses_atomic_status_filter(monkeypatch):
@@ -156,6 +342,18 @@ def test_reject_pending_proposal_uses_atomic_status_filter(monkeypatch):
     }]
 
 
+def test_order_receipt_patch_requires_exactly_one_updated_row(monkeypatch):
+    monkeypatch.setattr(trade, "query_supabase", lambda *args, **kwargs: [])
+
+    with pytest.raises(RuntimeError, match="정확히 1행"):
+        trade._patch_trade_proposal_returning(
+            "Bearer test",
+            "user-1",
+            "proposal-1",
+            {"status": "APPROVED", "external_order_id": "order-1"},
+        )
+
+
 def test_reject_endpoint_returns_conflict_when_pending_claim_is_lost(monkeypatch):
     monkeypatch.setattr(trade, "get_user_id_from_header", lambda auth_header: ("user-1", "token"))
     monkeypatch.setattr(
@@ -198,7 +396,11 @@ def test_same_proposal_is_sent_to_exchange_only_once(monkeypatch):
     monkeypatch.setattr(trade, "_build_precheck_payload", lambda **kwargs: _safe_precheck())
     monkeypatch.setattr(trade, "_claim_trade_proposal_for_execution", lambda *args: next(claims))
     monkeypatch.setattr(trade, "_build_exchange_client", lambda *args: order_client)
-    monkeypatch.setattr(trade, "_patch_trade_proposal", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        trade,
+        "_patch_trade_proposal_returning",
+        lambda *args, **kwargs: {"id": "proposal-1"},
+    )
 
     client = app.test_client()
     first = client.post(
@@ -250,6 +452,92 @@ def test_manual_real_order_limit_blocks_before_exchange_order(monkeypatch):
     assert response.status_code == 400
     assert "100,000원" in response.get_json()["message"]
     assert order_client.place_order_calls == 0
+
+
+def test_manual_order_requires_idempotency_key_before_exchange_order(monkeypatch):
+    order_client = FakeOrderClient()
+    monkeypatch.setattr(trade, "get_user_id_from_header", lambda auth_header: ("user-1", "token"))
+    monkeypatch.setattr(trade, "_load_user_exchange_record", lambda *args: ({}, "access", "secret"))
+    monkeypatch.setattr(trade, "_build_precheck_payload", lambda **kwargs: _safe_precheck())
+    monkeypatch.setattr(trade, "_build_exchange_client", lambda *args: order_client)
+
+    response = app.test_client().post(
+        "/api/trade/order",
+        headers={"Authorization": "Bearer test"},
+        json={
+            "exchange": "COINONE",
+            "symbol": "XRP",
+            "action": "BUY",
+            "order_type": "LIMIT",
+            "price": 800,
+            "quantity": 10,
+            "broker_env": "MOCK",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "idempotency_key" in response.get_json()["message"]
+    assert order_client.place_order_calls == 0
+
+
+def test_same_manual_order_idempotency_key_is_sent_to_exchange_only_once(monkeypatch):
+    order_client = FakeOrderClient()
+    claims = iter([
+        {"id": MANUAL_ORDER_KEY, "status": "APPROVED"},
+        None,
+    ])
+    pending = {
+        "id": MANUAL_ORDER_KEY,
+        "status": "PENDING",
+        "exchange": "COINONE",
+        "symbol": "XRP",
+        "side": "BUY",
+        "ord_type": "LIMIT",
+        "price": 800,
+        "volume": 10,
+        "broker_env": "MOCK",
+    }
+    monkeypatch.setattr(trade, "get_user_id_from_header", lambda auth_header: ("user-1", "token"))
+    monkeypatch.setattr(trade, "_load_user_exchange_record", lambda *args: ({}, "access", "secret"))
+    monkeypatch.setattr(trade, "_build_precheck_payload", lambda **kwargs: _safe_precheck())
+    monkeypatch.setattr(
+        trade,
+        "_create_or_load_manual_order_proposal",
+        lambda *args, **kwargs: (dict(pending), True),
+    )
+    monkeypatch.setattr(trade, "_claim_trade_proposal_for_execution", lambda *args: next(claims))
+    monkeypatch.setattr(trade, "_build_exchange_client", lambda *args: order_client)
+    monkeypatch.setattr(
+        trade,
+        "_patch_trade_proposal_returning",
+        lambda *args, **kwargs: {"id": MANUAL_ORDER_KEY},
+    )
+
+    payload = {
+        "idempotency_key": MANUAL_ORDER_KEY,
+        "exchange": "COINONE",
+        "symbol": "XRP",
+        "action": "BUY",
+        "order_type": "LIMIT",
+        "price": 800,
+        "quantity": 10,
+        "broker_env": "MOCK",
+    }
+    client = app.test_client()
+    first = client.post(
+        "/api/trade/order",
+        headers={"Authorization": "Bearer test"},
+        json=payload,
+    )
+    second = client.post(
+        "/api/trade/order",
+        headers={"Authorization": "Bearer test"},
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert order_client.place_order_calls == 1
 
 
 def test_mock_precheck_keeps_cash_and_holding_safety_gates(monkeypatch):
@@ -312,12 +600,13 @@ def test_binance_mock_sell_matches_base_asset_holding(monkeypatch):
         available_cash=1000.0,
         holding_qty=2.0,
         holding_symbol="BTC",
+        base_asset="BTC",
     )
     monkeypatch.setattr(trade, "_build_exchange_client", lambda *args: order_client)
 
     precheck = trade._build_precheck_payload(
         exchange="BINANCE",
-        symbol="BTCUSDT",
+        symbol="BTCEUR",
         action="SELL",
         order_type="LIMIT",
         quantity=1,
@@ -331,6 +620,35 @@ def test_binance_mock_sell_matches_base_asset_holding(monkeypatch):
     assert precheck["holding_qty"] == 2
     assert precheck["balance_check_failed"] is False
     assert precheck["insufficient_holding"] is False
+    assert order_client.symbol_info_calls == ["BTCEUR"]
+
+
+def test_binance_spot_symbol_info_returns_exchange_base_asset(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "symbols": [
+                    {
+                        "symbol": "BTCEUR",
+                        "baseAsset": "BTC",
+                        "quoteAsset": "EUR",
+                    }
+                ]
+            }
+
+    binance_module._SPOT_SYMBOL_INFO_CACHE.clear()
+    monkeypatch.setattr(binance_module.requests, "get", lambda *args, **kwargs: FakeResponse())
+
+    info = BinanceClient("api-key", "secret-key", env="MOCK").get_spot_symbol_info("BTC/EUR")
+
+    assert info == {
+        "symbol": "BTCEUR",
+        "base_asset": "BTC",
+        "quote_asset": "EUR",
+    }
 
 
 def test_precheck_rejects_non_finite_limit_price(monkeypatch):
@@ -461,8 +779,9 @@ def test_post_order_status_failure_preserves_submitted_proposal(monkeypatch):
     )
     monkeypatch.setattr(
         trade,
-        "_patch_trade_proposal",
-        lambda auth_header, proposal_id, payload: patched_payloads.append(payload),
+        "_patch_trade_proposal_returning",
+        lambda auth_header, user_id, proposal_id, payload: patched_payloads.append(payload)
+        or {"id": proposal_id},
     )
 
     response = app.test_client().post(
@@ -473,6 +792,8 @@ def test_post_order_status_failure_preserves_submitted_proposal(monkeypatch):
 
     assert response.status_code == 200
     assert order_client.place_order_calls == 1
+    assert patched_payloads[0]["external_order_id"] == "order-1"
+    assert patched_payloads[0]["status"] == "APPROVED"
     assert patched_payloads[-1]["status"] == "APPROVED"
     assert patched_payloads[-1]["external_order_id"] == "order-1"
 
@@ -503,7 +824,7 @@ def test_order_history_failure_returns_do_not_retry_error(monkeypatch):
     monkeypatch.setattr(trade, "_build_exchange_client", lambda *args: order_client)
     monkeypatch.setattr(
         trade,
-        "_patch_trade_proposal",
+        "_patch_trade_proposal_returning",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("database unavailable")),
     )
     monkeypatch.setattr(
@@ -553,7 +874,7 @@ def test_order_history_full_write_falls_back_to_minimal_receipt(monkeypatch):
     monkeypatch.setattr(trade, "_build_exchange_client", lambda *args: order_client)
     monkeypatch.setattr(
         trade,
-        "_patch_trade_proposal",
+        "_patch_trade_proposal_returning",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("full write failed")),
     )
     monkeypatch.setattr(
@@ -639,6 +960,7 @@ def test_recover_order_receipt_updates_existing_proposal_with_identifiers(monkey
     [
         ("FAILED", "FAILED", 409),
         ("REJECTED", "FAILED", 409),
+        ("EXPIRED_IN_MATCH", "FAILED", 409),
         ("CANCELED", "CANCELED", 409),
         ("FILLED", "EXECUTED", 200),
         ("OPEN", "APPROVED", 200),
@@ -658,14 +980,26 @@ def test_broker_response_status_is_persisted_without_false_execution(
     monkeypatch.setattr(trade, "_build_exchange_client", lambda *args: order_client)
     monkeypatch.setattr(
         trade,
-        "_insert_trade_proposal_with_schema_fallback",
-        lambda auth_header, payload: inserted_payloads.append(payload),
+        "_create_or_load_manual_order_proposal",
+        lambda *args, **kwargs: ({"id": MANUAL_ORDER_KEY, "status": "PENDING"}, True),
+    )
+    monkeypatch.setattr(
+        trade,
+        "_claim_trade_proposal_for_execution",
+        lambda *args: {"id": MANUAL_ORDER_KEY, "status": "APPROVED"},
+    )
+    monkeypatch.setattr(
+        trade,
+        "_patch_trade_proposal_returning",
+        lambda auth_header, user_id, proposal_id, payload: inserted_payloads.append(payload)
+        or {"id": proposal_id},
     )
 
     response = app.test_client().post(
         "/api/trade/order",
         headers={"Authorization": "Bearer test"},
         json={
+            "idempotency_key": MANUAL_ORDER_KEY,
             "exchange": "COINONE",
             "symbol": "XRP",
             "action": "BUY",
@@ -679,6 +1013,11 @@ def test_broker_response_status_is_persisted_without_false_execution(
     assert response.status_code == expected_http_status
     assert response.get_json()["success"] is (expected_http_status == 200)
     assert inserted_payloads[-1]["status"] == expected_status
+    if expected_http_status == 409:
+        assert "detail" not in response.get_json()
+        assert response.get_json()["error"]["code"] == "ORDER_NOT_ACCEPTED"
+    else:
+        assert "detail" not in response.get_json()
 
 
 def test_toss_us_precheck_converts_order_amount_to_krw(monkeypatch):

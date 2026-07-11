@@ -5,6 +5,7 @@ import { supabase, deleteUserWatchlistItem, ensureNewsSummaries, fetchUserWatchl
 import Header from '../components/Header.jsx'
 import AssetLogo from '../components/AssetLogo.jsx'
 import { getApiErrorMessage } from '../lib/apiError.js'
+import { buildManualOrderFingerprint, resolveManualOrderIdempotency, shouldResetManualOrderIdempotency } from '../lib/manualOrderIdempotency.js'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5050'
 const OPEN_ORDER_SELECT_FIELDS = 'id,exchange,asset_type,ticker,symbol,side,price,volume,ord_type,currency,broker_env,external_order_id,status,created_at'
@@ -410,6 +411,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
   const lastCandleSignatureRef = useRef('')
   const orderbookTradesInFlightRef = useRef(false)
   const candlesInFlightRef = useRef(false)
+  const manualOrderIdempotencyRef = useRef(null)
 
   const isIntradayInterval = !['1d', '1w', '1M'].includes(chartInterval)
   const effectiveOrderPrice = orderType === 'LIMIT' ? Number(price || 0) : currentPrice
@@ -2692,18 +2694,30 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
         leverage: exchange === 'BINANCE_UM_FUTURES' ? Number(futuresLeverage) : null,
         margin_type: exchange === 'BINANCE_UM_FUTURES' ? futuresMarginType : null
       }
+      const orderFingerprint = buildManualOrderFingerprint(payload)
+      const idempotencyState = resolveManualOrderIdempotency(
+        manualOrderIdempotencyRef.current,
+        orderFingerprint,
+        () => crypto.randomUUID(),
+      )
+      manualOrderIdempotencyRef.current = idempotencyState
+      payload.idempotency_key = idempotencyState.key
 
       const response = await fetch(`${API_BASE_URL}/api/trade/order`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': authHeader
+          'Authorization': authHeader,
+          'Idempotency-Key': idempotencyState.key
         },
         body: JSON.stringify(payload)
       })
 
       const resData = await response.json()
 
+      if (shouldResetManualOrderIdempotency(resData)) {
+        manualOrderIdempotencyRef.current = null
+      }
       if (resData.success) {
         const autoExitMessage = resData.auto_exit ? ` / ${resData.auto_exit}` : ''
         setTradeMessage({

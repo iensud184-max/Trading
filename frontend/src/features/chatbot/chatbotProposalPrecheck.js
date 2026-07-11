@@ -24,6 +24,13 @@ const APPROVAL_BLOCKER_FIELDS = [
   'exceeds_real_order_limit',
 ]
 
+export function isChatbotApprovalProposal(proposal) {
+  return (
+    String(proposal?.status || '').toUpperCase() === 'PENDING'
+    && proposal?.raw_order_payload?.source !== 'MANUAL_ORDER'
+  )
+}
+
 export function isProposalApprovalBlocked(proposal) {
   const payload = proposal?.raw_order_payload || {}
   const precheck = payload.precheck

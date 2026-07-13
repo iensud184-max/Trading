@@ -885,7 +885,7 @@ def create_trade_proposal_from_message(auth_header: str, message: str, intent: P
     parsed = intent or parse_order_intent(message)
     if not parsed.is_order_request or not parsed.side or not parsed.symbol_query:
         return {
-            "reply": "매매 제안을 만들 종목, 방향, 수량 또는 금액을 함께 알려주세요.",
+            "reply": "매매 제안을 만들 종목, 방향, 수량과 금액을 함께 알려주세요.",
             "data": {"source": "CHATBOT_ORDER_PARSER", "reason": "missing_order_intent"},
         }
 

@@ -15,6 +15,8 @@ import SearchNotFound from './pages/SearchNotFound'
 import InvestmentSurveyModal from './components/InvestmentSurveyModal'
 import { INQUIRY_ROUTES } from './dashboardConstants.js'
 import ChatbotWidget from './features/chatbot/ChatbotWidget.jsx'
+import useDeviceType from './hooks/useDeviceType.js'
+import MobileRoutes from './routes/MobileRoutes.jsx'
 
 function AppShell({
   isLoggedIn,
@@ -32,6 +34,8 @@ function AppShell({
   setInfoSubmitLoading,
   handleLogout,
 }) {
+  const { isMobileDevice } = useDeviceType()
+
   const handlePhoneFormatChange = (e) => {
     const value = e.target.value.replace(/[^0-9]/g, '')
     let formatted = value
@@ -170,6 +174,15 @@ function AppShell({
         />
       )}
 
+      {isMobileDevice ? (
+        <MobileRoutes
+          isLoggedIn={isLoggedIn}
+          userEmail={userEmail}
+          handleLogout={handleLogout}
+          userProfile={userProfile}
+          setUserProfile={setUserProfile}
+        />
+      ) : (
       <div>
         <Routes>
           <Route
@@ -274,6 +287,7 @@ function AppShell({
           />
         </Routes>
       </div>
+      )}
 
       <ChatbotWidget enabled={!showAdditionalInfo && !showSurvey} isLoggedIn={isLoggedIn} />
 

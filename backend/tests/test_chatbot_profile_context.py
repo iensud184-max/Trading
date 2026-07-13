@@ -49,6 +49,44 @@ class FakeRAGService:
         return "", []
 
 
+def test_reply_routes_disclosure_count_query_directly_to_search_web(monkeypatch):
+    calls: list[str] = []
+
+    def fake_search_web(auth_header, message):
+        calls.append(message)
+        return {
+            "reply": "DART 공시 3건을 요약했습니다.",
+            "data": {"source": "DISCLOSURE_DB", "items": [{}, {}, {}]},
+        }
+
+    def fail_run_chatbot_tool(auth_header, text):
+        raise AssertionError("공시 직접 조회는 일반 도구 라우팅 전에 처리해야 합니다.")
+
+    monkeypatch.setattr(
+        "backend.services.chatbot.chat_service.search_web",
+        fake_search_web,
+    )
+    monkeypatch.setattr(
+        "backend.services.chatbot.chat_service.run_chatbot_tool",
+        fail_run_chatbot_tool,
+    )
+
+    service = ChatbotService()
+    service.llm_client = FakeLLMClient()
+    service.rag_service = FakeRAGService()
+
+    result = service.reply(
+        "\uc0bc\uc131\uc804\uc790 \ucd5c\uadfc \uacf5\uc2dc 3\uac1c \ubcf4\uc5ec\uc918",
+        user_id="user-1",
+        auth_header="Bearer test",
+    )
+
+    assert result["reply"] == "DART 공시 3건을 요약했습니다."
+    assert result["meta"]["source"] == "PROJECT_TOOL_DISCLOSURE"
+    assert result["meta"]["tool_result"]["source"] == "DISCLOSURE_DB"
+    assert calls == ["\uc0bc\uc131\uc804\uc790 \ucd5c\uadfc \uacf5\uc2dc 3\uac1c \ubcf4\uc5ec\uc918"]
+
+
 class FakeConversationSupabaseBoundary:
     def __init__(self):
         self.history = []

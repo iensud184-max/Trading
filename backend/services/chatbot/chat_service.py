@@ -341,6 +341,14 @@ class ChatbotService:
             return get_portfolio_summary(auth_header, text or "평가 자산 요약해줘")
         return None
 
+    @staticmethod
+    def _is_direct_disclosure_lookup(text: str) -> bool:
+        value = str(text or "")
+        return "공시" in value and any(
+            keyword in value
+            for keyword in ["보여줘", "조회", "알려줘", "요약", "찾아줘", "최신", "최근"]
+        )
+
     def _tool_message_from_arguments(self, tool_name: str, arguments: dict, fallback_text: str) -> str:
         if tool_name in {"search_web", "add_watchlist_item"}:
             return str(arguments.get("query") or fallback_text)
@@ -452,7 +460,26 @@ class ChatbotService:
                             "pending_action": pending_action,
                             "source": "PROJECT_TOOL_PENDING",
                         },
-                    }
+                }
+
+        if self._is_direct_disclosure_lookup(text):
+            self._emit_trace(trace_callback, "tool_routing", "도구 확인")
+            tool_result = search_web(auth_header, text) if auth_header else None
+            if tool_result:
+                tool_data = tool_result.get("data")
+                trace_steps = self._emit_tool_trace_steps(trace_callback, tool_data)
+                self._record_exchange(auth_header, user_id, text, tool_result["reply"])
+                return {
+                    "reply": tool_result["reply"],
+                    "actions": tool_result.get("actions") or [],
+                    "meta": {
+                        "user_id": user_id,
+                        "available_tools": list_available_tools(),
+                        "tool_result": tool_data,
+                        "trace_steps": trace_steps,
+                        "source": "PROJECT_TOOL_DISCLOSURE",
+                    },
+                }
 
         self._emit_trace(trace_callback, "tool_routing", "도구 확인")
         tool_result = run_chatbot_tool(auth_header, text)

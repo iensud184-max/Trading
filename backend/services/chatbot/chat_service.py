@@ -14,6 +14,7 @@ from backend.services.chatbot.prompt_registry import build_system_prompt
 from backend.services.chatbot.rag_service import ChatbotRAGService
 from backend.services.chatbot.tool_registry import (
     add_watchlist_item,
+    get_asset_outlook,
     get_asset_price,
     get_exchange_rate,
     get_holdings,
@@ -342,7 +343,7 @@ class ChatbotService:
         return None
 
     def _tool_message_from_arguments(self, tool_name: str, arguments: dict, fallback_text: str) -> str:
-        if tool_name in {"search_web", "add_watchlist_item"}:
+        if tool_name in {"search_web", "add_watchlist_item", "get_asset_outlook"}:
             return str(arguments.get("query") or fallback_text)
         if tool_name == "search_trade_history":
             parts = ["거래내역"]
@@ -403,6 +404,7 @@ class ChatbotService:
             "list_open_orders": list_open_orders,
             "get_exchange_rate": get_exchange_rate,
             "get_asset_price": get_asset_price,
+            "get_asset_outlook": get_asset_outlook,
             "search_web": search_web,
         }
         tool_func = tool_map.get(tool_name)

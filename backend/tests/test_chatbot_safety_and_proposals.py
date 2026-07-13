@@ -448,6 +448,75 @@ def test_run_chatbot_tool_stores_precheck_payload_on_proposal(monkeypatch):
     assert calls[0]["json_data"]["raw_order_payload"]["precheck"]["insufficient_cash"] is False
 
 
+def test_run_chatbot_tool_asks_confirmation_before_plain_order_precheck(monkeypatch):
+    pending = {}
+
+    def fake_set_pending_action(auth_header, user_id, action, payload=None, ttl_seconds=300):
+        pending.update({
+            "auth_header": auth_header,
+            "user_id": user_id,
+            "action": action,
+            "payload": payload,
+            "ttl_seconds": ttl_seconds,
+        })
+
+    monkeypatch.setattr(tool_registry, "get_user_id_from_header", lambda auth_header: ("user-1", "test"))
+    monkeypatch.setattr(tool_registry._conversation_repository, "set_pending_action", fake_set_pending_action)
+    monkeypatch.setattr(
+        tool_registry,
+        "_resolve_symbol",
+        lambda auth_header, query: {
+            "symbol": "005930",
+            "display_name": "삼성전자",
+            "asset_type": "STOCK",
+            "market": "KR",
+        },
+    )
+    monkeypatch.setattr(
+        tool_registry,
+        "_run_chatbot_precheck",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("확인 전 사전검증 금지")),
+        raising=False,
+    )
+
+    result = run_chatbot_tool("Bearer test", "삼성전자 1주 사줘")
+
+    assert result["data"]["source"] == "CHATBOT_ORDER_CONFIRMATION"
+    assert result["data"]["status"] == "PENDING_CONFIRMATION"
+    assert pending["action"] == "trade_order_confirmation"
+    assert pending["payload"]["message"] == "삼성전자 1주 사줘"
+    assert "삼성전자" in result["reply"]
+    assert "1주" in result["reply"]
+    assert "맞" in result["reply"]
+
+
+def test_run_chatbot_tool_does_not_confirm_order_without_quantity(monkeypatch):
+    pending_calls = []
+
+    monkeypatch.setattr(tool_registry, "get_user_id_from_header", lambda auth_header: ("user-1", "test"))
+    monkeypatch.setattr(
+        tool_registry._conversation_repository,
+        "set_pending_action",
+        lambda *args, **kwargs: pending_calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        tool_registry,
+        "_resolve_symbol",
+        lambda auth_header, query: {
+            "symbol": "462350",
+            "display_name": "이노스페이스",
+            "asset_type": "STOCK",
+            "market": "KR",
+        },
+    )
+
+    result = run_chatbot_tool("Bearer test", "이노스페이스 매수하고 싶어")
+
+    assert pending_calls == []
+    assert result["data"]["reason"] == "missing_quantity"
+    assert "수량" in result["reply"]
+
+
 def test_run_chatbot_tool_routes_recommendation_request_to_recommendation_service(monkeypatch):
     class FakeRecommendationService:
         def recommend(self, auth_header, message):

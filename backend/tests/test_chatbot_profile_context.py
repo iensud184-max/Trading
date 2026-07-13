@@ -1,5 +1,6 @@
 from backend.services.chatbot.conversation_repository import ChatbotConversationRepository
 from backend.services.chatbot.chat_service import ChatbotService
+import backend.services.chatbot.chat_service as chat_service_module
 
 
 class FakeLLMClient:
@@ -271,6 +272,74 @@ def test_reply_executes_pending_portfolio_summary_on_confirmation(monkeypatch):
         "Bearer test",
         "user-1",
     ) is None
+
+
+def test_reply_executes_pending_trade_order_confirmation(monkeypatch):
+    boundary = FakeConversationSupabaseBoundary()
+    monkeypatch.setattr(
+        "backend.services.chatbot.conversation_repository.query_supabase",
+        boundary.query,
+    )
+    monkeypatch.setattr(
+        chat_service_module,
+        "create_trade_proposal_from_message",
+        lambda auth_header, message: {
+            "reply": "삼성전자 매수 제안을 만들었습니다.",
+            "data": {"source": "CHATBOT_ORDER_PARSER", "status": "PENDING"},
+        },
+        raising=False,
+    )
+
+    service = ChatbotService()
+    service.llm_client = FakeLLMClient()
+    service.rag_service = FakeRAGService()
+    service.conversation_repository.set_pending_action(
+        "Bearer test",
+        "user-1",
+        "trade_order_confirmation",
+        {"message": "삼성전자 1주 사줘"},
+    )
+
+    result = service.reply("맞아", user_id="user-1", auth_header="Bearer test")
+
+    assert result["reply"] == "삼성전자 매수 제안을 만들었습니다."
+    assert result["meta"]["source"] == "PROJECT_TOOL_PENDING"
+    assert service.conversation_repository.peek_pending_action(
+        "Bearer test",
+        "user-1",
+    ) is None
+
+
+def test_reply_treats_confirmation_with_extra_words_as_pending_confirmation(monkeypatch):
+    boundary = FakeConversationSupabaseBoundary()
+    monkeypatch.setattr(
+        "backend.services.chatbot.conversation_repository.query_supabase",
+        boundary.query,
+    )
+    monkeypatch.setattr(
+        chat_service_module,
+        "create_trade_proposal_from_message",
+        lambda auth_header, message: {
+            "reply": f"{message} 기준으로 제안을 만들었습니다.",
+            "data": {"source": "CHATBOT_ORDER_PARSER", "status": "PENDING"},
+        },
+        raising=False,
+    )
+
+    service = ChatbotService()
+    service.llm_client = FakeLLMClient()
+    service.rag_service = FakeRAGService()
+    service.conversation_repository.set_pending_action(
+        "Bearer test",
+        "user-1",
+        "trade_order_confirmation",
+        {"message": "삼성전자 1주 사줘"},
+    )
+
+    result = service.reply("맞아 Toss로 매수를 하고 싶어", user_id="user-1", auth_header="Bearer test")
+
+    assert result["reply"] == "삼성전자 1주 사줘 맞아 Toss로 매수를 하고 싶어 기준으로 제안을 만들었습니다."
+    assert result["meta"]["source"] == "PROJECT_TOOL_PENDING"
 
 
 def test_reply_includes_trace_steps_for_recommendation_rag_tool(monkeypatch):

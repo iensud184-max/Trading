@@ -236,7 +236,7 @@ def _detect_exchange(text: str) -> str | None:
 def _default_exchange_for_asset(asset_type: str, market: str) -> str:
     if str(asset_type or "").upper() == "CRYPTO":
         return "COINONE"
-    return "TOSS"
+    return "TOSS" if str(market or "").upper() == "US" else "KIS"
 
 
 def _detect_env(text: str) -> str | None:
@@ -245,6 +245,66 @@ def _detect_env(text: str) -> str | None:
     if "실전" in text or "실거래" in text or "REAL" in text.upper():
         return "REAL"
     return None
+
+
+def _is_plain_order_requiring_confirmation(message: str, parsed: ParsedOrderIntent) -> bool:
+    """
+    종목/방향/수량만 있는 첫 주문은 바로 사전검증하지 않고 사용자 확인을 먼저 받습니다.
+    """
+    if parsed.quantity is None or parsed.quantity <= 0:
+        return False
+    if parsed.price is not None or parsed.amount_krw is not None or parsed.sell_ratio is not None:
+        return False
+    if parsed.broker_env:
+        return False
+    if _detect_exchange(message):
+        return False
+    return True
+
+
+def _format_order_confirmation_reply(symbol_data: dict, parsed: ParsedOrderIntent, exchange: str, broker_env: str) -> str:
+    symbol = str(symbol_data.get("symbol") or parsed.symbol_query).upper()
+    display_name = str(symbol_data.get("display_name") or parsed.symbol_query or symbol).strip()
+    asset_label = f"{display_name}({symbol})" if display_name and display_name.upper() != symbol else symbol
+    side_label = "매수" if parsed.side == "BUY" else "매도"
+    quantity_label = _format_quantity(parsed.quantity)
+    env_label = "모의투자" if broker_env == "MOCK" else "실거래"
+    return (
+        f"{asset_label} {quantity_label}주 {side_label} 말씀하시는 건가요?\n"
+        f"맞으면 '맞아' 또는 '응'이라고 답해 주세요. "
+        f"확인 후 {exchange} {env_label} 기준으로 사전검증을 진행하겠습니다."
+    )
+
+
+def _store_order_confirmation(auth_header: str, message: str, parsed: ParsedOrderIntent, symbol_data: dict, exchange: str, broker_env: str) -> dict:
+    user_id, _ = get_user_id_from_header(auth_header)
+    _conversation_repository.set_pending_action(
+        auth_header,
+        user_id,
+        "trade_order_confirmation",
+        {
+            "message": message,
+            "symbol": str(symbol_data.get("symbol") or parsed.symbol_query).upper(),
+            "symbol_query": parsed.symbol_query,
+            "side": parsed.side,
+            "quantity": parsed.quantity,
+            "exchange": exchange,
+            "broker_env": broker_env,
+        },
+        ttl_seconds=300,
+    )
+    return {
+        "reply": _format_order_confirmation_reply(symbol_data, parsed, exchange, broker_env),
+        "data": {
+            "source": "CHATBOT_ORDER_CONFIRMATION",
+            "status": "PENDING_CONFIRMATION",
+            "exchange": exchange,
+            "symbol": str(symbol_data.get("symbol") or parsed.symbol_query).upper(),
+            "side": parsed.side,
+            "quantity": parsed.quantity,
+            "broker_env": broker_env,
+        },
+    }
 
 
 def _detect_ranking(text: str) -> str:
@@ -844,6 +904,8 @@ def create_trade_proposal_from_message(auth_header: str, message: str, intent: P
 
     symbol_data = _resolve_symbol(auth_header, parsed.symbol_query)
     symbol = str(symbol_data.get("symbol") or parsed.symbol_query).upper()
+    display_name = str(symbol_data.get("display_name") or parsed.symbol_query or symbol).strip()
+    asset_label = f"{display_name}({symbol})" if display_name and display_name.upper() != symbol else symbol
     asset_type = str(symbol_data.get("asset_type") or "STOCK").upper()
     market = str(symbol_data.get("market") or "").upper()
     exchange = _detect_exchange(message)
@@ -929,7 +991,7 @@ def create_trade_proposal_from_message(auth_header: str, message: str, intent: P
                 },
             }
         return {
-            "reply": f"{symbol} {parsed.side} 매매 제안을 만들 수량을 알려주세요.",
+            "reply": f"{asset_label} {'매수' if parsed.side == 'BUY' else '매도'} 제안을 만들 수량을 알려주세요.",
             "data": {"source": "CHATBOT_ORDER_PARSER", "reason": "missing_quantity", "symbol": symbol},
         }
     quantity = _normalize_order_quantity(quantity, asset_type)
@@ -1608,6 +1670,20 @@ def run_chatbot_tool(auth_header: str | None, message: str) -> dict | None:
     order_intent = parse_order_intent(text)
     if order_intent.is_order_request:
         enforce_tool_safety("create_trade_proposal", {"message": text})
+        if _is_plain_order_requiring_confirmation(text, order_intent):
+            symbol_data = _resolve_symbol(auth_header, order_intent.symbol_query)
+            asset_type = str(symbol_data.get("asset_type") or "STOCK").upper()
+            market = str(symbol_data.get("market") or "").upper()
+            exchange = _default_exchange_for_asset(asset_type, market)
+            broker_env = "MOCK"
+            return _store_order_confirmation(
+                auth_header,
+                text,
+                order_intent,
+                symbol_data,
+                exchange,
+                broker_env,
+            )
         return create_trade_proposal_from_message(auth_header, text, order_intent)
 
     def guarded(tool_name: str, tool_func):

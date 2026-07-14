@@ -60,25 +60,33 @@ function mapSide(value) {
 }
 
 export function buildTradeHistoryPresentation(toolResult) {
-  if (toolResult?.source !== 'TRADE_HISTORY' || !Array.isArray(toolResult.items)) {
+  const source = normalizeTradeText(toolResult?.source).toUpperCase()
+  const isTradeTableSource = source === 'TRADE_HISTORY' || source === 'OPEN_ORDERS'
+  if (!isTradeTableSource || !Array.isArray(toolResult.items)) {
     return { shouldRender: false, count: 0, items: [] }
   }
 
-  const items = toolResult.items.map((item) => ({
-    date: normalizeTradeText(item?.date) || '-',
-    time: normalizeTradeText(item?.time) || '-',
-    exchange: normalizeTradeText(item?.exchange) || '-',
-    assetName: normalizeTradeText(item?.asset_name || item?.symbol) || '-',
-    symbol: normalizeTradeText(item?.symbol) || '-',
-    side: mapSide(item?.side),
-    status: mapStatus(item?.status, item?.side),
-    priceText: formatTradeCurrency(item?.price, item?.currency, 'unit'),
-    quantityText: formatTradeQuantity(item?.quantity),
-    amountText: formatTradeCurrency(item?.amount, item?.currency, 'total'),
-  }))
+  const items = toolResult.items.map((item) => {
+    const exchange = normalizeTradeText(item?.exchange)
+    const brokerEnv = normalizeTradeText(item?.broker_env)
+
+    return {
+      date: normalizeTradeText(item?.date) || '-',
+      time: normalizeTradeText(item?.time) || '-',
+      exchange: exchange ? `${exchange}${brokerEnv ? ` (${brokerEnv})` : ''}` : '-',
+      assetName: normalizeTradeText(item?.asset_name || item?.symbol) || '-',
+      symbol: normalizeTradeText(item?.symbol) || '-',
+      side: mapSide(item?.side),
+      status: mapStatus(item?.status, item?.side),
+      priceText: formatTradeCurrency(item?.price, item?.currency, 'unit'),
+      quantityText: formatTradeQuantity(item?.quantity),
+      amountText: formatTradeCurrency(item?.amount, item?.currency, 'total'),
+    }
+  })
 
   return {
     shouldRender: items.length > 0,
+    title: source === 'OPEN_ORDERS' ? '미체결 주문' : '거래내역',
     count: items.length,
     items,
   }

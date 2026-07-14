@@ -241,7 +241,7 @@ function TradeHistoryResults({ presentation }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2 border-b border-slate-700/70 pb-2">
-        <p className="font-bold text-cyan-200">거래내역</p>
+        <p className="font-bold text-cyan-200">{presentation.title || '거래내역'}</p>
         <span className="shrink-0 rounded border border-cyan-500/30 bg-cyan-950/30 px-2 py-0.5 text-[10px] font-bold text-cyan-100">
           {presentation.count}건
         </span>

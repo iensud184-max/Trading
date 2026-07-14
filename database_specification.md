@@ -402,6 +402,26 @@ erDiagram
 *   **RLS**:
     *   조회(SELECT)는 누구나 가능, 갱신(UPSERT)은 `service_role` 계정 전용.
 
+### 2.14.1 market_calendar_days
+*   **용도**: 한국장(`KR`)과 미국장(`US`)의 일자별 개장/휴장 및 정규장 운영 시간을 저장하는 캘린더 캐시 테이블입니다. 챗봇이 특정 날짜의 장 운영 여부를 일반 지식으로 추측하지 않고, DB 또는 Toss 장 운영 캘린더 API 결과를 기준으로 답변할 때 사용합니다.
+*   **주요 컬럼**:
+    *   `id` (UUID, PK)
+    *   `market_country` (TEXT) - `KR` 또는 `US`
+    *   `trade_date` (DATE) - 장 운영 여부를 확인할 기준 일자
+    *   `is_open` (BOOLEAN) - 정규장 운영 여부
+    *   `holiday_name` (TEXT) - 휴장 사유 또는 휴일명
+    *   `regular_open_at` (TIMESTAMPTZ) - 정규장 시작 시각
+    *   `regular_close_at` (TIMESTAMPTZ) - 정규장 종료 시각
+    *   `source` (TEXT) - `TOSS`, `KRX`, `NYSE`, `NASDAQ` 등 데이터 출처
+    *   `raw_payload` (JSONB) - 원본 캘린더 응답
+    *   `created_at` (TIMESTAMPTZ)
+    *   `updated_at` (TIMESTAMPTZ)
+*   **제약조건**:
+    *   `UNIQUE (market_country, trade_date)` 복합 제약조건 적용.
+    *   `market_country IN ('KR', 'US')` 적용.
+*   **RLS**:
+    *   로그인 사용자는 조회(SELECT) 가능, 생성/수정/삭제는 `service_role` 전용.
+
 ---
 
 ### 2.15 paper_portfolios

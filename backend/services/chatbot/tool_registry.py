@@ -3,7 +3,7 @@ import math
 import os
 import re
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlencode
@@ -12,7 +12,7 @@ import requests
 
 from backend.services.auth_service import get_user_id_from_header
 from backend.services.chatbot.conversation_repository import ChatbotConversationRepository
-from backend.services.supabase_client import query_supabase, safe_query_supabase
+from backend.services.supabase_client import query_supabase, safe_query_supabase, safe_query_supabase_as_service_role
 from backend.services.symbol_metadata import enrich_symbol
 from backend.services.chatbot.web_fallback_search_service import ChatbotWebFallbackSearchService
 from backend.services.chatbot.safety_guard import enforce_tool_safety
@@ -24,6 +24,8 @@ from backend.services.chatbot.portfolio_summary_service import (
 )
 from backend.services.chatbot.recommendation_service import ChatbotRecommendationService
 from backend.services.chatbot.asset_ml_outlook import build_single_asset_ml_outlook
+from backend.services.toss_client import TossClient
+from backend.utils.crypto_helper import CryptoHelper
 
 
 API_BASE_URL = os.getenv("CHATBOT_INTERNAL_API_BASE_URL", "http://localhost:5050")
@@ -274,6 +276,7 @@ def list_available_tools() -> list[str]:
         "get_holdings",
         "search_trade_history",
         "list_open_orders",
+        "get_market_calendar",
         "get_exchange_rate",
         "get_asset_price",
         "get_asset_orderbook",
@@ -429,6 +432,271 @@ def _detect_env(text: str) -> str | None:
     if "실전" in text or "실거래" in text or "REAL" in text.upper():
         return "REAL"
     return None
+
+
+def _detect_market_country_for_calendar(text: str) -> str | None:
+    value = str(text or "")
+    upper_value = value.upper()
+    kr_keywords = [
+        "한국장",
+        "국내장",
+        "국장",
+        "한국 증시",
+        "국내 증시",
+        "코스피",
+        "코스닥",
+        "KRX",
+        "KOSPI",
+        "KOSDAQ",
+        "제헌절",
+        "한글날",
+        "광복절",
+        "개천절",
+        "추석",
+        "설날",
+    ]
+    us_keywords = [
+        "미국장",
+        "미장",
+        "미국 증시",
+        "나스닥",
+        "뉴욕증시",
+        "NYSE",
+        "NASDAQ",
+        "S&P",
+        "에스앤피",
+        "다우",
+    ]
+    if any(keyword.upper() in upper_value for keyword in us_keywords):
+        return "US"
+    if any(keyword.upper() in upper_value for keyword in kr_keywords):
+        return "KR"
+    return None
+
+
+def _detect_calendar_date(text: str) -> str:
+    value = str(text or "")
+    now = datetime.now(timezone(timedelta(hours=9)))
+    if "오늘" in value:
+        return now.date().isoformat()
+    if "내일" in value:
+        return (now.date() + timedelta(days=1)).isoformat()
+    if "어제" in value:
+        return (now.date() - timedelta(days=1)).isoformat()
+
+    iso_match = re.search(r"(20\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})", value)
+    if iso_match:
+        year, month, day = (int(part) for part in iso_match.groups())
+        return datetime(year, month, day).date().isoformat()
+
+    month_day_match = re.search(r"(\d{1,2})\s*월\s*(\d{1,2})\s*일", value)
+    if month_day_match:
+        month, day = (int(part) for part in month_day_match.groups())
+        return datetime(now.year, month, day).date().isoformat()
+
+    return now.date().isoformat()
+
+
+def _is_calendar_request(text: str) -> bool:
+    value = str(text or "")
+    calendar_keywords = [
+        "장 열",
+        "장열",
+        "개장",
+        "휴장",
+        "거래 가능",
+        "정규거래",
+        "정규 거래",
+        "장 운영",
+        "캘린더",
+        "쉬는날",
+        "쉬는 날",
+    ]
+    return any(keyword in value for keyword in calendar_keywords) and any(
+        keyword in value
+        for keyword in ["장", "증시", "거래", "시장", "한국", "국내", "미국", "제헌절", "휴장", "개장"]
+    )
+
+
+def _get_user_toss_calendar_client(auth_header: str, broker_env: str = "REAL") -> TossClient:
+    user_id, _ = get_user_id_from_header(auth_header)
+    params = {
+        "user_id": f"eq.{user_id}",
+        "exchange": "eq.TOSS",
+        "broker_env": f"eq.{broker_env}",
+        "select": "encrypted_access_key,encrypted_secret_key,toss_account_seq",
+        "limit": "1",
+    }
+    records = safe_query_supabase(auth_header, "user_api_keys", "GET", params=params) or []
+    if records:
+        encryption_key = os.getenv("ENCRYPTION_KEY", "default-dev-encryption-key-32bytes!")
+        crypto = CryptoHelper(encryption_key)
+        record = records[0]
+        return TossClient(
+            client_id=crypto.decrypt(record.get("encrypted_access_key")),
+            client_secret=crypto.decrypt(record.get("encrypted_secret_key")),
+            account_seq=record.get("toss_account_seq"),
+            env=broker_env,
+            user_id=user_id,
+        )
+
+    client_id = os.getenv("SHARED_TOSS_CLIENT_ID") or os.getenv("TOSS_CLIENT_ID") or os.getenv("TOSS_API_KEY")
+    client_secret = os.getenv("SHARED_TOSS_CLIENT_SECRET") or os.getenv("TOSS_CLIENT_SECRET") or os.getenv("TOSS_SECRET_KEY")
+    account_seq = os.getenv("SHARED_TOSS_ACCOUNT_SEQ") or os.getenv("TOSS_ACCOUNT_SEQ")
+    if client_id and client_secret:
+        return TossClient(
+            client_id=client_id,
+            client_secret=client_secret,
+            account_seq=account_seq,
+            env=broker_env,
+            user_id="shared_system",
+        )
+
+    return TossClient(client_id="", client_secret="", env="MOCK", user_id="mock_calendar")
+
+
+def _calendar_session(raw: dict, key: str) -> dict:
+    today = raw.get("today") if isinstance(raw, dict) else {}
+    integrated = today.get("integrated") if isinstance(today, dict) else {}
+    session = integrated.get(key) if isinstance(integrated, dict) else {}
+    return session if isinstance(session, dict) else {}
+
+
+def _normalize_calendar_row(market_country: str, trade_date: str, raw: dict, source: str) -> dict:
+    today = raw.get("today") if isinstance(raw, dict) else {}
+    regular = _calendar_session(raw, "regularMarket")
+    regular_open_at = regular.get("startTime")
+    regular_close_at = regular.get("endTime")
+    is_open = bool(today and regular_open_at and regular_close_at)
+    holiday_name = ""
+    if isinstance(today, dict):
+        holiday_name = str(today.get("holidayName") or today.get("name") or "").strip()
+    if not is_open and not holiday_name:
+        holiday_name = "휴장일"
+    return {
+        "market_country": market_country,
+        "trade_date": trade_date,
+        "is_open": is_open,
+        "holiday_name": holiday_name or None,
+        "regular_open_at": regular_open_at,
+        "regular_close_at": regular_close_at,
+        "source": source,
+        "raw_payload": raw,
+    }
+
+
+def _fetch_calendar_row_from_db(market_country: str, trade_date: str) -> dict | None:
+    rows = safe_query_supabase_as_service_role(
+        "market_calendar_days",
+        "GET",
+        params={
+            "market_country": f"eq.{market_country}",
+            "trade_date": f"eq.{trade_date}",
+            "select": "id,market_country,trade_date,is_open,holiday_name,regular_open_at,regular_close_at,source,raw_payload",
+            "limit": "1",
+        },
+    ) or []
+    return rows[0] if rows else None
+
+
+def _upsert_calendar_row(row: dict) -> None:
+    existing = _fetch_calendar_row_from_db(row["market_country"], row["trade_date"])
+    if existing and existing.get("id"):
+        safe_query_supabase_as_service_role(
+            f"market_calendar_days?id=eq.{existing['id']}",
+            "PATCH",
+            json_data=row,
+        )
+        return
+    safe_query_supabase_as_service_role("market_calendar_days", "POST", json_data=row)
+
+
+def _format_calendar_reply(row: dict, requested_text: str) -> str:
+    country = row.get("market_country")
+    country_label = "한국장" if country == "KR" else "미국장"
+    trade_date = row.get("trade_date")
+    source = row.get("source") or "DB"
+    if row.get("is_open"):
+        open_at = str(row.get("regular_open_at") or "")
+        close_at = str(row.get("regular_close_at") or "")
+        session_text = ""
+        if open_at and close_at:
+            session_text = f"\n정규장 시간: {open_at} ~ {close_at}"
+        return f"{trade_date} 기준\n{country_label}은 정규 거래일입니다.{session_text}\n출처: {source}"
+    holiday = row.get("holiday_name") or "휴장일"
+    return f"{trade_date} 기준\n{country_label}은 휴장일입니다.\n사유: {holiday}\n출처: {source}"
+
+
+def get_market_calendar(auth_header: str, message: str) -> dict:
+    market_country = _detect_market_country_for_calendar(message)
+    trade_date = _detect_calendar_date(message)
+    if not market_country:
+        return {
+            "reply": "어느 시장의 장 운영 여부를 확인할까요?\n예: 한국장, 미국장",
+            "data": {
+                "source": "MARKET_CALENDAR",
+                "reason": "missing_market_country",
+                "trade_date": trade_date,
+            },
+        }
+
+    cached_row = _fetch_calendar_row_from_db(market_country, trade_date)
+    if cached_row:
+        return {
+            "reply": _format_calendar_reply(cached_row, message),
+            "data": {
+                "source": "MARKET_CALENDAR_DB",
+                "market_country": market_country,
+                "trade_date": trade_date,
+                "row": cached_row,
+            },
+        }
+
+    today = datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+    if trade_date != today:
+        country_label = "한국장" if market_country == "KR" else "미국장"
+        return {
+            "reply": (
+                f"{trade_date} 기준 {country_label} 장 운영 데이터가 아직 DB에 없습니다.\n"
+                "특정 날짜의 개장/휴장 여부는 캘린더 DB 적재 후 확인할 수 있습니다.\n"
+                "현재는 값을 추측하지 않습니다."
+            ),
+            "data": {
+                "source": "MARKET_CALENDAR_DB_MISS",
+                "market_country": market_country,
+                "trade_date": trade_date,
+            },
+        }
+
+    env = _detect_env(message) or "REAL"
+    try:
+        client = _get_user_toss_calendar_client(auth_header, env)
+        raw = client.get_market_calendar(market_country)
+    except Exception as error:
+        return {
+            "reply": (
+                "장 운영 캘린더를 조회하지 못했습니다.\n"
+                "Toss API 키, 계좌 환경, API 허용 IP를 확인한 뒤 다시 시도해 주세요."
+            ),
+            "data": {
+                "source": "MARKET_CALENDAR_ERROR",
+                "market_country": market_country,
+                "trade_date": trade_date,
+                "error": str(error),
+            },
+        }
+
+    row = _normalize_calendar_row(market_country, trade_date, raw, "TOSS")
+    _upsert_calendar_row(row)
+    return {
+        "reply": _format_calendar_reply(row, message),
+        "data": {
+            "source": "MARKET_CALENDAR_TOSS",
+            "market_country": market_country,
+            "trade_date": trade_date,
+            "row": row,
+        },
+    }
 
 
 def _is_plain_order_requiring_confirmation(message: str, parsed: ParsedOrderIntent) -> bool:
@@ -2506,6 +2774,8 @@ def run_chatbot_tool(auth_header: str | None, message: str) -> dict | None:
     is_direct_read_request = any(keyword in text for keyword in ["보여줘", "조회", "알려줘", "뽑아줘", "요약", "뭐뭐 있어", "얼마"])
     if "투자성향" in text and any(keyword in text for keyword in ["재분석", "다시", "변경", "수정"]):
         return get_investment_profile_reanalysis_guide()
+    if _is_calendar_request(text):
+        return guarded("get_market_calendar", get_market_calendar)
     if any(keyword in text for keyword in ["환율", "환전", "달러", "미달러", "엔화", "유로", "위안", "테더", "USDT"]):
         return guarded("get_exchange_rate", get_exchange_rate)
     if _is_asset_orderbook_request(text):

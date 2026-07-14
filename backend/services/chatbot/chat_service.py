@@ -29,6 +29,7 @@ from backend.services.chatbot.tool_registry import (
     get_exchange_rate,
     get_holdings,
     get_home_market_rankings,
+    get_market_calendar,
     get_portfolio_summary,
     list_available_tools,
     list_open_orders,
@@ -105,7 +106,7 @@ def build_tool_trace_steps(tool_result_data: dict | None) -> list[dict]:
         add("ml", "ML 신호")
     if source in {"TAVILY", "TAVILY_FALLBACK", "TAVILY_API"}:
         add("tavily", "Tavily 웹검색")
-    if source in {"DISCLOSURE_DB", "NEWS_DB", "VECTOR_DB", "HOME_MARKET", "OPEN_ORDERS"}:
+    if source in {"DISCLOSURE_DB", "NEWS_DB", "VECTOR_DB", "HOME_MARKET", "OPEN_ORDERS", "MARKET_CALENDAR_DB", "MARKET_CALENDAR_TOSS"}:
         add("db", "Supabase DB 조회")
     if source in {"VECTOR_DB"} or citations:
         add("rag", "RAG 벡터검색")
@@ -607,6 +608,11 @@ class ChatbotService:
             base = str(arguments.get("base_currency") or "").strip()
             quote = str(arguments.get("quote_currency") or "KRW").strip()
             return f"{base}/{quote} 환율 알려줘".strip()
+        if tool_name == "get_market_calendar":
+            market_country = str(arguments.get("market_country") or "").strip().upper()
+            date = str(arguments.get("date") or "").strip()
+            market_text = "한국장" if market_country == "KR" else "미국장" if market_country == "US" else ""
+            return " ".join(part for part in [date, market_text, "장 운영 여부 알려줘"] if part)
         if tool_name == "get_asset_price":
             query = str(arguments.get("query") or fallback_text).strip()
             exchange = str(arguments.get("exchange") or "").strip()
@@ -646,6 +652,7 @@ class ChatbotService:
             "search_trade_history": search_trade_history,
             "list_open_orders": list_open_orders,
             "get_exchange_rate": get_exchange_rate,
+            "get_market_calendar": get_market_calendar,
             "get_asset_price": get_asset_price,
             "get_asset_orderbook": get_asset_orderbook,
             "get_asset_outlook": get_asset_outlook,

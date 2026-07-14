@@ -84,6 +84,17 @@ FUNCTION_SCHEMAS = [
         },
     },
     {
+        "name": "get_market_calendar",
+        "description": "한국장 또는 미국장의 개장, 휴장, 정규장 운영 여부를 Toss 캘린더 API와 Supabase 캘린더 DB 기준으로 조회합니다. OpenAI 일반 지식으로 휴장 여부를 추측하지 않습니다.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "market_country": {"type": "string", "enum": ["KR", "US"], "description": "KR은 한국장, US는 미국장"},
+                "date": {"type": "string", "description": "조회 날짜. 예: 2026-07-17"},
+            },
+        },
+    },
+    {
         "name": "get_asset_price",
         "description": "특정 주식 또는 코인의 현재가와 등락률을 Toss/KIS/Coinone/Binance API 기준으로 조회합니다. OpenAI 일반 지식으로 가격을 답하지 않습니다.",
         "parameters": {

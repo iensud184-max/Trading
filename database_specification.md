@@ -461,6 +461,9 @@ erDiagram
     *   `token_count` (BIGINT) - 일일 예약 토큰 수
     *   `updated_at` (TIMESTAMPTZ)
 *   **RPC**: `consume_chatbot_usage()`가 advisory lock으로 동시 요청을 직렬화하고 한도를 초과하면 증가 없이 `allowed=false`를 반환합니다.
+*   **RLS**:
+    *   `authenticated` 사용자는 `auth.uid() = user_id`인 자신의 카운터만 조회·생성·수정할 수 있습니다.
+    *   한도 차감은 `consume_chatbot_usage()` RPC를 통해 원자적으로 처리합니다.
 
 ### 2.17.1 chatbot_token_usage_logs
 *   **용도**: OpenAI Chat Completions 응답에서 반환된 실제 챗봇 토큰 사용량을 요청 단위로 저장합니다. 기존 `chatbot_usage_counters`는 한도 차감용 추정 카운터이며, 이 테이블은 관리자 관찰과 감사용 실제 사용량 로그입니다.
@@ -476,9 +479,10 @@ erDiagram
     *   `created_at` (TIMESTAMPTZ)
 *   **보안 원칙**:
     *   대화 원문, tool payload, 계좌 정보, API 키, 거래소 raw 응답은 저장하지 않습니다.
-    *   일반 사용자는 자신의 로그만 조회/생성할 수 있습니다.
     *   관리자 전체 집계는 백엔드 service role 기반 `/api/admin/users` 계열 API에서만 제공합니다.
-*   **RLS**: 사용자별 행만 접근할 수 있도록 `auth.uid() = user_id`를 적용합니다.
+*   **RLS**:
+    *   `authenticated` 사용자는 `auth.uid() = user_id`인 자신의 실제 토큰 로그만 조회·생성할 수 있습니다.
+    *   일반 사용자는 다른 사용자의 로그를 조회하거나 수정·삭제할 수 없습니다.
 
 ### 2.18 user_knowledge_notes
 *   **용도**: 앱 내부 투자노트와 Obsidian 플러그인에서 동기화한 Markdown 노트를 사용자별로 저장합니다. 현재 1차 구현은 원문 저장과 해시 기반 변경 감지만 담당하며, 후속 단계에서 `knowledge_chunks`/vector 검색으로 확장합니다.

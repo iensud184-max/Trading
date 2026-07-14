@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Header from '../components/Header.jsx'
 import { supabase } from '../supabaseClient.js'
-import { getApiErrorMessage } from '../lib/apiError.js'
+import { buildApiErrorText } from '../lib/apiError.js'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5050'
 const USER_PAGE_SIZE = 100
@@ -83,7 +83,7 @@ export default function AdminUsers({ isLoggedIn, userEmail, handleLogout, hideHe
       const response = await fetch(`${API_BASE_URL}/api/admin/users?${params.toString()}`, { headers, signal })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok || payload.success === false) {
-        throw new Error(getApiErrorMessage(payload, '유저 목록을 불러오지 못했습니다.'))
+        throw new Error(buildApiErrorText(payload, '유저 목록을 불러오지 못했습니다.'))
       }
       if (listRequestSequence.current !== requestSequence) return
       const rows = payload.data || []
@@ -144,7 +144,7 @@ export default function AdminUsers({ isLoggedIn, userEmail, handleLogout, hideHe
         })
         const payload = await response.json().catch(() => ({}))
         if (!response.ok || payload.success === false) {
-          throw new Error(getApiErrorMessage(payload, '유저 사용량을 불러오지 못했습니다.'))
+          throw new Error(buildApiErrorText(payload, '유저 사용량을 불러오지 못했습니다.'))
         }
         if (detailRequestSequence.current === requestSequence) {
           setDetail(payload)

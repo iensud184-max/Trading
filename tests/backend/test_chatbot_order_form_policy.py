@@ -3,6 +3,7 @@ import importlib
 import pytest
 
 from backend.services.chatbot import chat_service
+from backend.services.chatbot import tool_registry
 from backend.services.chatbot.chat_service import ChatbotService
 
 
@@ -98,3 +99,47 @@ def test_investment_question_does_not_open_order_form():
     policy = importlib.import_module("backend.services.chatbot.order_form_policy")
 
     assert policy.build_order_form_redirect("비트코인 지금 살까?") is None
+
+
+def test_direct_tool_routing_cannot_create_plain_order(monkeypatch):
+    monkeypatch.setattr(
+        tool_registry,
+        "_resolve_symbol",
+        lambda auth_header, query: {
+            "symbol": "005930",
+            "display_name": "삼성전자",
+            "asset_type": "STOCK_KR",
+            "market": "KR",
+        },
+    )
+    monkeypatch.setattr(tool_registry, "_is_plain_order_requiring_confirmation", lambda message, parsed: False)
+    monkeypatch.setattr(
+        tool_registry,
+        "create_trade_proposal_from_message",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("일반 도구 라우팅에서 제안 생성 금지")),
+    )
+
+    result = tool_registry.run_chatbot_tool("Bearer test", "삼성전자 10주 사줘")
+
+    assert result is not None
+    assert result["data"]["source"] == "ORDER_FORM_REDIRECT"
+
+
+@pytest.mark.parametrize("pending_action", ["trade_order_confirmation", "trade_proposal_retry"])
+def test_legacy_pending_order_confirmation_redirects_to_form(monkeypatch, pending_action):
+    service = _build_service()
+    monkeypatch.setattr(
+        tool_registry,
+        "create_trade_proposal_from_message",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("기존 대기 작업에서 제안 생성 금지")),
+    )
+
+    result = service._run_pending_action(
+        pending_action,
+        "Bearer test",
+        "응 진행해줘",
+        {"message": "삼성전자 10주 사줘"},
+    )
+
+    assert result is not None
+    assert result["data"]["source"] == "ORDER_FORM_REDIRECT"

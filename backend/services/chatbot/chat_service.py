@@ -22,7 +22,6 @@ from backend.services.chatbot.prompt_registry import build_system_prompt
 from backend.services.chatbot.rag_service import ChatbotRAGService
 from backend.services.chatbot.tool_registry import (
     add_watchlist_item,
-    create_trade_proposal_from_message,
     get_asset_candles,
     get_asset_orderbook,
     get_asset_outlook,
@@ -557,13 +556,7 @@ class ChatbotService:
                         "reason": "missing_pending_order_message",
                     },
                 }
-            confirmation_text = str(text or "").strip()
-            merged_message = (
-                f"{original_message} {confirmation_text}"
-                if confirmation_text
-                else original_message
-            )
-            return create_trade_proposal_from_message(auth_header, merged_message)
+            return build_order_form_redirect(original_message)
         if action == "trade_proposal_retry":
             pending_payload = payload if isinstance(payload, dict) else {}
             original_message = str(pending_payload.get("message") or "").strip()
@@ -571,7 +564,7 @@ class ChatbotService:
                 return None
             confirmation_text = str(text or "").strip()
             if self._is_confirmation(confirmation_text) or any(k in confirmation_text for k in ["다시", "재시도", "진행"]):
-                return create_trade_proposal_from_message(auth_header, original_message)
+                return build_order_form_redirect(original_message)
             return None
         if action == "last_asset_price_context":
             pending_payload = payload if isinstance(payload, dict) else {}

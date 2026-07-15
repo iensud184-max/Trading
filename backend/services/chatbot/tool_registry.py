@@ -17,6 +17,7 @@ from backend.services.symbol_metadata import enrich_symbol
 from backend.services.chatbot.web_fallback_search_service import ChatbotWebFallbackSearchService
 from backend.services.chatbot.safety_guard import enforce_tool_safety
 from backend.services.chatbot.order_parser import ParsedOrderIntent, parse_order_intent
+from backend.services.chatbot.order_form_policy import build_order_form_redirect
 from backend.services.chatbot.portfolio_summary_service import (
     build_portfolio_totals,
     format_portfolio_reply,
@@ -3521,6 +3522,10 @@ def run_chatbot_tool(auth_header: str | None, message: str) -> dict | None:
         return None
 
     text = str(message or "")
+    order_form_redirect = build_order_form_redirect(text)
+    if order_form_redirect:
+        return order_form_redirect
+
     if _is_recommendation_reference_order(text):
         enforce_tool_safety("create_trade_proposal", {"message": text})
         return create_trade_proposal_from_recommendation_reference(auth_header, text)

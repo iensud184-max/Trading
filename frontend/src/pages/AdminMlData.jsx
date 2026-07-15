@@ -4,7 +4,7 @@ import { supabase } from '../supabaseClient'
 import AdminInquiries from './AdminInquiries.jsx'
 import AdminUsers from './AdminUsers.jsx'
 import AdminSymbolReconciliation from './AdminSymbolReconciliation.jsx'
-import { AuditBadge, GuardSummary, JobLogModal, StatusPanel } from './adminMlDataPanels.jsx'
+import { AuditBadge, GuardSummary, JobLogModal, StatusPanel, VersionDeltaPanel } from './adminMlDataPanels.jsx'
 import {
   buildQualityDetail,
   findGuardCheck,
@@ -14,7 +14,6 @@ import {
   formatPathInText,
   formatPercent,
   formatReturnPercent,
-  formatSignedDelta,
   formatStaleness,
   formatTime,
   formatTrustValue,
@@ -22,7 +21,6 @@ import {
   getSignalGradeLabel,
   getSignalGradeTone,
   getSimpleGuardStatus,
-  getVersionSnapshot,
   legacyAutomationPresets,
   operationalAutomationPresets,
   presets,
@@ -33,62 +31,6 @@ import {
 } from './adminMlDataModel.js'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5050'
-
-function VersionDeltaPanel({ activeVersion, baselines = [] }) {
-  const activeSnapshot = getVersionSnapshot(activeVersion)
-  const visibleBaselines = baselines.filter((baseline) => baseline?.version && baseline.version !== activeVersion?.version)
-
-  if (!activeVersion?.version || !activeSnapshot || !visibleBaselines.length) {
-    return null
-  }
-
-  return (
-    <div className="mt-5 rounded-lg border border-slate-800 bg-[#0f172a] p-4">
-      <div className="mb-3">
-        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">버전 차이 요약</p>
-        <p className="mt-1 text-xs leading-5 text-slate-500">
-          현재 선택 버전이 비교 기준보다 얼마나 좋아졌는지 빠르게 확인합니다.
-        </p>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {visibleBaselines.map((baseline) => {
-          const baselineSnapshot = getVersionSnapshot(baseline)
-          if (!baselineSnapshot) return null
-
-          return (
-            <div key={`${activeVersion.version}-${baseline.version}`} className="rounded-lg border border-slate-800 bg-black/10 p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-bold text-white">{baseline.label}</p>
-                  <p className="mt-1 font-mono text-[10px] text-slate-500">
-                    {baseline.version} {'->'} {activeVersion.version}
-                  </p>
-                </div>
-                <span className="rounded border border-ai-cyan/30 px-2 py-1 text-[10px] font-bold text-ai-cyan">
-                  DELTA
-                </span>
-              </div>
-              <div className="mt-3 grid gap-2 text-xs text-slate-300">
-                <p>
-                  시계열 CV 구분력: <span className="font-mono text-white">{formatSignedDelta(activeSnapshot.cvRocAuc - baselineSnapshot.cvRocAuc)}</span>
-                </p>
-                <p>
-                  상위 10% 적중: <span className="font-mono text-white">{formatSignedDelta(activeSnapshot.top10Precision - baselineSnapshot.top10Precision)}</span>
-                </p>
-                <p>
-                  하락 구분력: <span className="font-mono text-white">{formatSignedDelta(activeSnapshot.riskCvRocAuc - baselineSnapshot.riskCvRocAuc)}</span>
-                </p>
-                <p>
-                  복합 초과수익(순): <span className="font-mono text-ai-cyan">{formatSignedDelta(activeSnapshot.compositeExcessReturnNet - baselineSnapshot.compositeExcessReturnNet, 'return')}</span>
-                </p>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
 
 function TrustMetric({ label, check, hint }) {
   const status = check?.passed ? 'healthy' : 'warning'

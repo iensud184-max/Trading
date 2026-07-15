@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Header from '../components/Header.jsx'
 import { supabase } from '../supabaseClient.js'
 import { buildApiErrorText } from '../lib/apiError.js'
@@ -98,6 +98,7 @@ export default function AdminUsers({ isLoggedIn, userEmail, handleLogout, hideHe
   const [users, setUsers] = useState([])
   const [summary, setSummary] = useState({ totalUsers: 0, todayTokens: 0, tokens30d: 0, activeUsers24h: 0 })
   const [query, setQuery] = useState('')
+  const [committedQuery, setCommittedQuery] = useState('')
   const [sort, setSort] = useState('tokens_30d')
   const [order, setOrder] = useState('desc')
   const [page, setPage] = useState(0)
@@ -126,11 +127,11 @@ export default function AdminUsers({ isLoggedIn, userEmail, handleLogout, hideHe
   )
   const modalUser = selectedUser
 
-  const authHeaders = async () => {
+  const authHeaders = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.access_token) throw new Error('로그인이 필요합니다.')
     return { Authorization: `Bearer ${session.access_token}` }
-  }
+  }, [])
 
   const totalUsers = Number(summary.totalUsers || 0)
   const visibleUsersTotalTokens = users.reduce((total, item) => total + Number(item.usage?.totalTokens || 0), 0)
@@ -139,7 +140,7 @@ export default function AdminUsers({ isLoggedIn, userEmail, handleLogout, hideHe
   const pageStart = users.length ? page * USER_PAGE_SIZE + 1 : 0
   const pageEnd = users.length ? page * USER_PAGE_SIZE + users.length : 0
 
-  const loadUsers = async ({ pageOverride = page, signal } = {}) => {
+  const loadUsers = useCallback(async ({ pageOverride = 0, queryOverride = '', signal } = {}) => {
     const requestSequence = listRequestSequence.current + 1
     listRequestSequence.current = requestSequence
     setLoading(true)
@@ -153,7 +154,7 @@ export default function AdminUsers({ isLoggedIn, userEmail, handleLogout, hideHe
         limit: String(USER_PAGE_SIZE),
         offset: String(pageOverride * USER_PAGE_SIZE),
       })
-      if (query.trim()) params.set('q', query.trim())
+      if (queryOverride) params.set('q', queryOverride)
       const response = await fetch(`${API_BASE_URL}/api/admin/users?${params.toString()}`, { headers, signal })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok || payload.success === false) {
@@ -174,28 +175,37 @@ export default function AdminUsers({ isLoggedIn, userEmail, handleLogout, hideHe
         setLoading(false)
       }
     }
-  }
+  }, [authHeaders, order, sort])
 
   useEffect(() => {
     const controller = new AbortController()
     const timeoutId = window.setTimeout(() => {
-      loadUsers({ signal: controller.signal })
+      loadUsers({ pageOverride: page, queryOverride: committedQuery, signal: controller.signal })
     }, 0)
     return () => {
       window.clearTimeout(timeoutId)
       controller.abort()
     }
-  }, [sort, order, page])
+  }, [committedQuery, loadUsers, page])
 
   const handleSearch = () => {
-    if (page === 0) {
-      loadUsers({ pageOverride: 0 })
-    } else {
+    const nextQuery = query.trim()
+    if (nextQuery !== committedQuery) {
+      setCommittedQuery(nextQuery)
+      if (page !== 0) {
+        setPage(0)
+      }
+      return
+    }
+
+    if (page !== 0) {
       setPage(0)
+    } else {
+      loadUsers({ pageOverride: 0, queryOverride: nextQuery })
     }
   }
 
-  const loadUserDetail = async ({ userId, signal } = {}) => {
+  const loadUserDetail = useCallback(async ({ userId, signal } = {}) => {
     if (!userId) return
     const requestSequence = detailRequestSequence.current + 1
     detailRequestSequence.current = requestSequence
@@ -226,9 +236,9 @@ export default function AdminUsers({ isLoggedIn, userEmail, handleLogout, hideHe
         setDetailLoading(false)
       }
     }
-  }
+  }, [authHeaders])
 
-  const loadUserTradeHistory = async ({ userId, signal } = {}) => {
+  const loadUserTradeHistory = useCallback(async ({ userId, signal } = {}) => {
     if (!userId) return
     const requestSequence = tradeRequestSequence.current + 1
     tradeRequestSequence.current = requestSequence
@@ -259,7 +269,7 @@ export default function AdminUsers({ isLoggedIn, userEmail, handleLogout, hideHe
         setTradeLoading(false)
       }
     }
-  }
+  }, [authHeaders])
 
   const handleOpenUserModal = (item) => {
     setSelectedUserId(item.id)
@@ -283,7 +293,7 @@ export default function AdminUsers({ isLoggedIn, userEmail, handleLogout, hideHe
   const handleRefresh = async () => {
     setRefreshing(true)
     try {
-      await loadUsers({ pageOverride: page })
+      await loadUsers({ pageOverride: page, queryOverride: committedQuery })
       if (isUserModalOpen && modalUser?.id) {
         await loadUserDetail({ userId: modalUser.id })
         if (activeModalTab === 'trades') {
@@ -321,7 +331,7 @@ export default function AdminUsers({ isLoggedIn, userEmail, handleLogout, hideHe
       setUsers((current) => current.map((item) => (item.id === updatedUser.id ? { ...item, ...updatedUser } : item)))
       setRoleDraft(updatedUser.role === 'ADMIN' ? 'ADMIN' : 'USER')
       setRoleNotice('권한이 변경되었습니다.')
-      await loadUsers({ pageOverride: page })
+      await loadUsers({ pageOverride: page, queryOverride: committedQuery })
     } catch (requestError) {
       setRoleNotice(requestError.message || '유저 권한을 변경하지 못했습니다.')
     } finally {
@@ -343,7 +353,7 @@ export default function AdminUsers({ isLoggedIn, userEmail, handleLogout, hideHe
       window.clearTimeout(timeoutId)
       controller.abort()
     }
-  }, [isUserModalOpen, modalUser?.id])
+  }, [isUserModalOpen, loadUserDetail, modalUser?.id])
 
   useEffect(() => {
     const userId = modalUser?.id
@@ -359,7 +369,7 @@ export default function AdminUsers({ isLoggedIn, userEmail, handleLogout, hideHe
       window.clearTimeout(timeoutId)
       controller.abort()
     }
-  }, [isUserModalOpen, activeModalTab, modalUser?.id])
+  }, [isUserModalOpen, activeModalTab, loadUserTradeHistory, modalUser?.id])
 
   return (
     <div className={hideHeader ? 'font-inter text-[#e2e2ec]' : 'min-h-screen bg-obsidian-bg font-inter text-[#e2e2ec]'}>

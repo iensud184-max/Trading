@@ -228,6 +228,8 @@ frontend/
         ├── dashboardModel.js
         ├── dashboardModel.test.mjs
         ├── Home.jsx
+        ├── homeModel.js
+        ├── homeModel.test.mjs
         ├── Inquiry.jsx
         ├── inquiryModel.js
         ├── inquiryModel.test.mjs
@@ -284,6 +286,12 @@ frontend/
   - `WatchlistTab.jsx`와 `MobileWatchlistTab.jsx`가 공유하는 시장 필터, 차트 config, 캔들 정규화, 선택 종목 보정 순수 유틸
 - `watchlistModel.test.mjs`
   - `watchlistModel.js`의 순수 함수 Node test
+- `Home.jsx`
+  - 홈 시장 랭킹, 국내·해외 주식/코인 필터, 관심종목 토글을 제공하는 데스크톱 홈 화면
+- `homeModel.js`
+  - `Home.jsx`와 `useMobileHomeMarket.js`가 공유하는 시장 랭킹 포맷, 국내·해외 판별, 정렬, 관심종목 키 계산 순수 유틸
+- `homeModel.test.mjs`
+  - `homeModel.js`의 순수 함수 Node test
 - `AdminInquiryPanel.jsx`
   - 3분리 모델 자동화 상태 모니터링 및 수동 검증 패널
 - `AdminMlData.jsx`

@@ -5,7 +5,7 @@
       "destination": "http://52.79.188.213/:path*"
     },
     {
-      "source": "/((?!assets/|favicon.ico|logo.png|.*\\.).*)",
+      "source": "/:path*",
       "destination": "/index.html"
     }
   ]

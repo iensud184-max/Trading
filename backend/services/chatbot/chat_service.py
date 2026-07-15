@@ -27,6 +27,7 @@ from backend.services.chatbot.tool_registry import (
     get_asset_orderbook,
     get_asset_outlook,
     get_asset_price,
+    get_crypto_market_context,
     get_exchange_rate,
     get_holdings,
     get_home_market_rankings,
@@ -39,6 +40,7 @@ from backend.services.chatbot.tool_registry import (
     search_web,
 )
 from backend.services.chatbot.order_parser import parse_order_intent
+from backend.services.chatbot.order_form_policy import build_order_form_redirect
 from backend.services.chatbot.safety_guard import enforce_tool_safety
 from backend.services.chatbot.user_context_lookup import (
     UserLookupContext,
@@ -298,6 +300,15 @@ class ChatbotService:
         except Exception:
             self._log_repository_failure("챗봇 대기 작업 조회에 실패했습니다.")
             return None
+
+    def _discard_trade_pending_action(
+        self,
+        auth_header: str | None,
+        user_id: str | None,
+    ) -> None:
+        pending_action = self._peek_pending_action(auth_header, user_id)
+        if str(pending_action or "").startswith("trade_proposal_missing_"):
+            self._consume_pending_action(auth_header, user_id)
 
     def _build_prompt_for_user(
         self,
@@ -585,6 +596,12 @@ class ChatbotService:
     def _tool_message_from_arguments(self, tool_name: str, arguments: dict, fallback_text: str) -> str:
         if tool_name in {"search_web", "add_watchlist_item", "get_asset_outlook"}:
             return str(arguments.get("query") or fallback_text)
+        if tool_name == "get_crypto_market_context":
+            query = str(arguments.get("query") or fallback_text).strip()
+            exchange = str(arguments.get("exchange") or "").strip()
+            broker_env = str(arguments.get("broker_env") or "").strip()
+            interval = str(arguments.get("interval") or "").strip()
+            return " ".join(part for part in [query, exchange, broker_env, interval, "코인 분석해줘"] if part)
         if tool_name == "search_trade_history":
             parts = ["거래내역"]
             if arguments.get("symbol"):
@@ -664,6 +681,7 @@ class ChatbotService:
             "get_asset_orderbook": get_asset_orderbook,
             "get_asset_candles": get_asset_candles,
             "get_asset_outlook": get_asset_outlook,
+            "get_crypto_market_context": get_crypto_market_context,
             "search_web": search_web,
         }
         tool_func = tool_map.get(tool_name)
@@ -725,6 +743,24 @@ class ChatbotService:
             return {
                 "reply": "궁금한 내용을 입력해 주세요. 예: 보유자산 요약해줘, XRP 시세 알려줘",
                 "actions": [],
+            }
+
+        order_form_redirect = build_order_form_redirect(text)
+        if order_form_redirect:
+            self._discard_trade_pending_action(auth_header, user_id)
+            tool_data = order_form_redirect["data"]
+            trace_steps = self._emit_tool_trace_steps(trace_callback, tool_data)
+            self._record_exchange(auth_header, user_id, text, order_form_redirect["reply"])
+            return {
+                "reply": order_form_redirect["reply"],
+                "actions": order_form_redirect["actions"],
+                "meta": {
+                    "user_id": user_id,
+                    "available_tools": list_available_tools(),
+                    "tool_result": tool_data,
+                    "trace_steps": trace_steps,
+                    "source": "ORDER_FORM_REDIRECT",
+                },
             }
 
         pending_peek = self._peek_pending_action(auth_header, user_id)

@@ -169,3 +169,15 @@ def test_exchange_name_is_not_parsed_as_symbol_query():
     assert intent.symbol_query == "비트코인"
     assert intent.price == 80000000
     assert intent.order_type == "LIMIT"
+
+
+def test_buy_opinion_request_is_not_order_creation():
+    intent = parse_order_intent("삼성전자 매수 의견 줘")
+
+    assert intent.is_order_request is False
+
+
+def test_outlook_analysis_request_is_not_order_creation():
+    intent = parse_order_intent("AAPL 전망 분석해줘")
+
+    assert intent.is_order_request is False

@@ -7,6 +7,7 @@ import {
   createEmptyOrderDraft,
   getOrderEntryLabels,
   invalidatePrecheck,
+  normalizeOrderEntryPrefill,
 } from './orderEntryModel.js'
 
 test('새 매매 요청은 계좌와 주문 방향을 임의 선택하지 않는다', () => {
@@ -109,5 +110,25 @@ test('사전검증 요청은 선택된 계좌와 종목만 사용한다', () => 
     leverage: 3,
     margin_type: 'ISOLATED',
     idempotency_key: '55555555-5555-4555-8555-555555555555',
+  })
+})
+
+test('자연어 주문 임시값은 계좌와 종목 선택 없이 제한된 필드만 반영한다', () => {
+  const prefill = normalizeOrderEntryPrefill({
+    symbol_query: '삼성전자',
+    intent: 'BUY',
+    quantity: 1,
+    order_type: 'LIMIT',
+    price: 70000,
+    broker_env: 'REAL',
+    exchange: 'TOSS',
+  })
+
+  assert.deepEqual(prefill, {
+    symbol_query: '삼성전자',
+    intent: 'BUY',
+    quantity: '1',
+    order_type: 'LIMIT',
+    price: '70000',
   })
 })

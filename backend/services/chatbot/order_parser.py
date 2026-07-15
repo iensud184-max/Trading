@@ -52,6 +52,9 @@ ORDER_STRATEGY_PATTERNS = (
     "비중",
     "시나리오",
     "리밸런싱",
+    "의견",
+    "전망",
+    "분석",
 )
 
 DIRECT_ORDER_CREATION_PATTERNS = (

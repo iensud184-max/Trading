@@ -14,7 +14,7 @@ def _build_service() -> ChatbotService:
     return ChatbotService()
 
 
-def test_plain_order_returns_top_button_guidance_without_action_or_prefill(monkeypatch):
+def test_plain_order_returns_form_action_with_limited_prefill(monkeypatch):
     service = _build_service()
     monkeypatch.setattr(
         chat_service,
@@ -27,22 +27,38 @@ def test_plain_order_returns_top_button_guidance_without_action_or_prefill(monke
 
     result = service.reply("코인원 XRP 10개 800원에 사줘", user_id=None, auth_header=None)
 
-    assert result["reply"] == "주문은 상단의 매매 요청에서 직접 입력해 주세요."
-    assert result["actions"] == []
-    assert result["meta"]["tool_result"] == {"source": "ORDER_ENTRY_REQUIRED"}
+    assert result["reply"] == "주문은 매매 요청 폼에서 계좌, 종목, 수량, 가격을 직접 확인한 뒤 진행할 수 있습니다."
+    assert result["actions"] == [
+        {
+            "type": "open_order_form",
+            "label": "매매 요청 열기",
+            "prefill": {
+                "symbol_query": "XRP",
+                "intent": "BUY",
+                "quantity": 10.0,
+                "price": 800.0,
+                "order_type": "LIMIT",
+            },
+        }
+    ]
+    assert result["meta"]["tool_result"]["source"] == "ORDER_ENTRY_REQUIRED"
 
 
-def test_order_form_policy_does_not_extract_or_store_order_fields():
+def test_order_form_policy_prefills_only_user_provided_order_fields():
     policy = importlib.import_module("backend.services.chatbot.order_form_policy")
 
     result = policy.build_order_form_redirect("삼성전자 10주 사줘")
 
     assert result is not None
-    assert result == {
-        "reply": "주문은 상단의 매매 요청에서 직접 입력해 주세요.",
-        "actions": [],
-        "data": {"source": "ORDER_ENTRY_REQUIRED"},
+    assert result["reply"] == "주문은 매매 요청 폼에서 계좌, 종목, 수량, 가격을 직접 확인한 뒤 진행할 수 있습니다."
+    assert result["actions"][0]["type"] == "open_order_form"
+    assert result["actions"][0]["prefill"] == {
+        "symbol_query": "삼성전자",
+        "intent": "BUY",
+        "quantity": 10.0,
+        "order_type": "MARKET",
     }
+    assert result["data"]["source"] == "ORDER_ENTRY_REQUIRED"
 
 
 def test_structured_order_keeps_existing_proposal_path(monkeypatch):
@@ -172,6 +188,12 @@ def test_investment_question_does_not_open_order_form():
     policy = importlib.import_module("backend.services.chatbot.order_form_policy")
 
     assert policy.build_order_form_redirect("비트코인 지금 살까?") is None
+
+
+def test_buy_opinion_does_not_open_order_form():
+    policy = importlib.import_module("backend.services.chatbot.order_form_policy")
+
+    assert policy.build_order_form_redirect("삼성전자 매수 의견 줘") is None
 
 
 def test_direct_tool_routing_cannot_create_plain_order(monkeypatch):

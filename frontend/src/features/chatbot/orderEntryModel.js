@@ -25,6 +25,20 @@ export function createEmptyOrderDraft() {
   }
 }
 
+export function normalizeOrderEntryPrefill(prefill = {}) {
+  const intent = ['BUY', 'SELL'].includes(prefill.intent) ? prefill.intent : ''
+  const orderType = ['LIMIT', 'MARKET'].includes(prefill.order_type) ? prefill.order_type : ''
+  const quantity = Number(prefill.quantity)
+  const price = Number(prefill.price)
+  return {
+    intent,
+    symbol_query: String(prefill.symbol_query || '').trim(),
+    quantity: Number.isFinite(quantity) && quantity > 0 ? String(quantity) : '',
+    order_type: orderType,
+    price: Number.isFinite(price) && price > 0 ? String(price) : '',
+  }
+}
+
 export function invalidatePrecheck(draft, changes = {}) {
   return {
     ...draft,

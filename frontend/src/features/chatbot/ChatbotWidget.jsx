@@ -585,6 +585,7 @@ export default function ChatbotWidget({
   const [isSending, setIsSending] = useState(false)
   const [showOrderForm, setShowOrderForm] = useState(false)
   const [orderFormRevision, setOrderFormRevision] = useState(0)
+  const [orderFormPrefill, setOrderFormPrefill] = useState(null)
   const [pendingProposals, setPendingProposals] = useState([])
   const [proposalActionId, setProposalActionId] = useState('')
   const widgetInstanceId = useId()
@@ -761,6 +762,12 @@ export default function ChatbotWidget({
   }
 
   const handleAction = (action) => {
+    if (action?.type === 'open_order_form') {
+      setOrderFormPrefill(action.prefill || null)
+      setOrderFormRevision((revision) => revision + 1)
+      setShowOrderForm(true)
+      return
+    }
     if (action?.type === 'navigate' && action.to) {
       navigate(action.to)
       if (!isMobilePage) closeChat()
@@ -772,6 +779,7 @@ export default function ChatbotWidget({
       setShowOrderForm(false)
       return
     }
+    setOrderFormPrefill(null)
     setOrderFormRevision((revision) => revision + 1)
     setShowOrderForm(true)
   }
@@ -1101,6 +1109,7 @@ export default function ChatbotWidget({
               <div className="mb-3 max-h-[520px] overflow-y-auto rounded-lg border border-slate-800 bg-[#070b14]/90 p-0.5">
                 <OrderEntryFlow
                   key={orderFormRevision}
+                  initialPrefill={orderFormPrefill}
                   onClose={() => setShowOrderForm(false)}
                   onProposalCreated={(result) => addMessage(
                     'assistant',

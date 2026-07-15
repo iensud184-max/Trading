@@ -18,6 +18,7 @@ import {
   invalidatePrecheck,
   isFuturesAccount,
   isHoldingsIntent,
+  normalizeOrderEntryPrefill,
 } from './orderEntryModel'
 
 const INTENT_LABELS = {
@@ -70,9 +71,13 @@ function ErrorNotice({ message }) {
   )
 }
 
-export default function OrderEntryFlow({ onClose, onProposalCreated }) {
+export default function OrderEntryFlow({ onClose, onProposalCreated, initialPrefill = null }) {
+  const prefill = useMemo(() => normalizeOrderEntryPrefill(initialPrefill || {}), [initialPrefill])
   const [step, setStep] = useState(1)
-  const [draft, setDraft] = useState(createEmptyOrderDraft)
+  const [draft, setDraft] = useState(() => ({
+    ...createEmptyOrderDraft(),
+    ...prefill,
+  }))
   const [accounts, setAccounts] = useState([])
   const [symbols, setSymbols] = useState([])
   const [holdings, setHoldings] = useState([])
@@ -197,6 +202,11 @@ export default function OrderEntryFlow({ onClose, onProposalCreated }) {
       ...createEmptyOrderDraft(),
       idempotency_key: current.idempotency_key,
       account,
+      intent: getAvailableIntents(account).includes(prefill.intent) ? prefill.intent : '',
+      symbol_query: prefill.symbol_query,
+      quantity: prefill.quantity,
+      order_type: prefill.order_type,
+      price: prefill.price,
     }))
   }
 
@@ -323,7 +333,14 @@ export default function OrderEntryFlow({ onClose, onProposalCreated }) {
                       setHoldings([])
                       setSymbols([])
                       setWorking(isHoldingsIntent(intent))
-                      updateDraft({ intent, selected_symbol: null, symbol_query: '', quantity: '', price: '' })
+                      updateDraft({
+                        intent,
+                        selected_symbol: null,
+                        symbol_query: prefill.symbol_query,
+                        quantity: prefill.quantity,
+                        order_type: prefill.order_type,
+                        price: prefill.price,
+                      })
                     }}
                     className={`min-h-10 rounded border px-3 py-2 font-bold ${
                       draft.intent === intent

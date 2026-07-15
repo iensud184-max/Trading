@@ -234,6 +234,7 @@ frontend/
         ├── assetDetailHeader.jsx
         ├── assetDetailModel.js
         ├── assetDetailModel.test.mjs
+        ├── assetDetailNewsDisclosurePanel.jsx
         ├── assetDetailOrderPanels.jsx
         ├── AssetsTab.jsx
         ├── assetsTabModel.js
@@ -286,6 +287,8 @@ frontend/
   - TOSS 주식 상세 헤더의 종목 유의사항 배지 연동
 - `assetDetailAutoRulesPanel.jsx`
   - `AssetDetail.jsx`와 `MobileAssetDetail.jsx`가 공유하는 조건감시 등록, 수정, 상태 목록 패널
+- `assetDetailNewsDisclosurePanel.jsx`
+  - `AssetDetail.jsx`와 `MobileAssetDetail.jsx`가 공유하는 뉴스 목록, 뉴스 요약, DART 공시 목록, 공시 AI 분석 콘텐츠 패널
 - `assetDetailHeader.jsx`
   - `AssetDetail.jsx`와 `MobileAssetDetail.jsx`가 공유하는 종목 메타, 즐겨찾기, 종목 유의사항, 현재가 헤더 컴포넌트
 - `assetDetailChartPanel.jsx`

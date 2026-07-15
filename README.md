@@ -159,6 +159,7 @@ npm run build
 - 2026-07-15 AdminInquiries 1차 정리: 데스크톱/모바일 문의 관리자 답변 모달 초기값을 key 기반 재마운트로 처리하고 초기 목록 fetch effect 경고를 정리했습니다. 전체 lint 상태는 `0 errors`, `12 warnings`입니다.
 - 2026-07-15 AdminSymbolReconciliation 1차 정리: 종목 정리 관리자 화면의 인증 헤더와 최신 스캔 로더를 안정화하고 초기 로딩 effect 경고를 정리했습니다. 전체 lint 상태는 `0 errors`, `10 warnings`입니다.
 - 2026-07-15 AssetLogo 1차 정리: 공통 자산 로고 URL 생성 로직을 `frontend/src/components/assetLogoModel.js`로 분리하고 컴포넌트 effect 경고와 Fast Refresh export 경고를 정리했습니다. 전체 lint 상태는 `0 errors`, `8 warnings`입니다.
+- 2026-07-15 공통 effect 1차 정리: 디바이스 감지 훅, 대시보드 사이드바 권한 표시, 데스크톱/모바일 뉴스 초기 로딩 effect 경고를 정리했습니다. 전체 lint 상태는 `0 errors`, `4 warnings`입니다.
 
 ## 주요 API
 

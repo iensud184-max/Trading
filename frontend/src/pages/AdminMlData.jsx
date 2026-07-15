@@ -18,6 +18,7 @@ import {
   ServingAuditPanel,
   StatusPanel,
   VersionDeltaPanel,
+  VersionComparisonTable,
 } from './adminMlDataPanels.jsx'
 import {
   findGuardCheck,
@@ -27,7 +28,6 @@ import {
   formatReturnPercent,
   formatTime,
   formatTrustValue,
-  formatVersionBacktest,
   legacyAutomationPresets,
   operationalAutomationPresets,
   presets,
@@ -350,101 +350,6 @@ function JobHistoryPanel({ jobs = [], loading, error, onShowLog }) {
           ))}
         </tbody>
       </table>
-    </div>
-  )
-}
-
-function VersionComparisonTable({ versions = [], selectedVersion, recommendedVersion, latestVersion, servingVersion, onSelectVersion }) {
-  if (!versions.length) {
-    return null
-  }
-
-  return (
-    <div className="mt-5 rounded-lg border border-slate-800 bg-[#0f172a] p-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">버전 비교</p>
-        <div className="flex flex-wrap gap-2">
-          <span className="rounded border border-ai-cyan/40 px-2 py-1 text-[10px] font-bold text-ai-cyan">
-            현재 선택: {selectedVersion || '-'}
-          </span>
-          <span className="rounded border border-fuchsia-500/40 px-2 py-1 text-[10px] font-bold text-fuchsia-300">
-            서비스 반영: {servingVersion || '-'}
-          </span>
-          <span className="rounded border border-emerald-500/40 px-2 py-1 text-[10px] font-bold text-emerald-300">
-            추천: {recommendedVersion || '-'}
-          </span>
-          <span className="rounded border border-slate-600 px-2 py-1 text-[10px] font-bold text-slate-300">
-            최신: {latestVersion || '-'}
-          </span>
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-left text-xs text-slate-300">
-          <thead className="text-[10px] uppercase tracking-wider text-slate-500">
-            <tr>
-              <th className="px-2 py-2">버전</th>
-              <th className="px-2 py-2">CV 구분력</th>
-              <th className="px-2 py-2">상위 10% 적중</th>
-              <th className="px-2 py-2">하락 구분력</th>
-              <th className="px-2 py-2">복합 초과수익(순)</th>
-              <th className="px-2 py-2">복합 승률</th>
-              <th className="px-2 py-2">최대낙폭</th>
-              <th className="px-2 py-2">검증 행 수</th>
-              <th className="px-2 py-2">상태</th>
-            </tr>
-          </thead>
-          <tbody>
-            {versions
-              .slice()
-              .sort((a, b) => (b.version_number || 0) - (a.version_number || 0))
-              .map((version) => (
-                <tr
-                  key={version.version}
-                  className="cursor-pointer border-t border-slate-800 transition hover:bg-white/5"
-                  onClick={() => onSelectVersion?.(version.version)}
-                >
-                  <td className="px-2 py-2 font-mono text-white">{version.version}</td>
-                  <td className="px-2 py-2">{formatMetric(version.metrics?.time_series_cv_average?.roc_auc || version.metrics?.roc_auc)}</td>
-                  <td className="px-2 py-2">{formatMetric(version.metrics?.time_series_cv_average?.precision_at_top_10pct || version.metrics?.precision_at_top_10pct)}</td>
-                  <td className="px-2 py-2">{formatMetric(version.risk_metrics?.time_series_cv_average?.roc_auc || version.risk_metrics?.roc_auc)}</td>
-                  <td className="px-2 py-2 font-mono">{formatVersionBacktest(version, 'excess_return_net')}</td>
-                  <td className="px-2 py-2">{formatPercent(version.backtests?.composite?.data?.selection_win_rate_net ?? version.backtests?.composite?.data?.selection_win_rate)}</td>
-                  <td className="px-2 py-2 font-mono">{formatReturnPercent(version.backtests?.composite?.data?.max_drawdown_net ?? version.backtests?.composite?.data?.max_drawdown)}</td>
-                  <td className="px-2 py-2">{version.metrics?.valid_rows ?? '-'}</td>
-                  <td className="px-2 py-2">
-                    <div className="flex flex-wrap gap-1">
-                      <span className={`rounded border px-2 py-1 text-[10px] font-bold ${
-                        version.version === selectedVersion
-                          ? 'border-ai-cyan/40 text-ai-cyan'
-                          : version.updated
-                            ? 'border-emerald-500/40 text-emerald-300'
-                            : 'border-slate-700 text-slate-500'
-                      }`}>
-                        {version.version === selectedVersion ? '분석 중' : version.updated ? '준비 완료' : '데이터 없음'}
-                      </span>
-                      {version.version === recommendedVersion ? (
-                        <span className="rounded border border-emerald-500/30 px-2 py-1 text-[10px] font-bold text-emerald-300">
-                          추천
-                        </span>
-                      ) : null}
-                      {version.version === servingVersion || version.is_serving ? (
-                        <span className="rounded border border-fuchsia-500/30 px-2 py-1 text-[10px] font-bold text-fuchsia-300">
-                          서비스 적용
-                        </span>
-                      ) : null}
-                      {version.version === latestVersion ? (
-                        <span className="rounded border border-slate-600 px-2 py-1 text-[10px] font-bold text-slate-300">
-                          최신
-                        </span>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   )
 }

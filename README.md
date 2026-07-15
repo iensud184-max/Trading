@@ -147,6 +147,7 @@ npm run build
 - 2026-07-15 TradeHistory 1차 리팩토링: 데스크톱/모바일 거래내역 공통 순수 유틸을 `frontend/src/pages/tradeHistoryModel.js`로 분리하고 Node test를 추가했습니다. 전체 lint 상태는 `0 errors`, `97 warnings`입니다.
 - 2026-07-15 Chatbot Tool Registry 1차 리팩토링: 종목 별칭, 심볼 검색어 추출, 후보 선택 응답 순수 로직을 `backend/services/chatbot/tool_symbol_model.py`로 분리하고 pytest를 추가했습니다.
 - 2026-07-15 Settings 1차 리팩토링: 데스크톱/모바일 설정 화면 공통 키 상태 정규화, 닉네임 검증, 거래소별 저장/테스트 payload 생성을 `frontend/src/pages/settingsModel.js`로 분리하고 Node test를 추가했습니다.
+- 2026-07-15 Inquiry 1차 리팩토링: 데스크톱/모바일 문의 화면 공통 문의 라벨, 첨부파일 검증, 목록 정렬·필터·페이지네이션, 등록 폼 검증을 `frontend/src/pages/inquiryModel.js`로 분리하고 Node test를 추가했습니다.
 
 ## 주요 API
 

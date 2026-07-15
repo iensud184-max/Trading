@@ -226,6 +226,9 @@ frontend/
         ├── dashboardModel.js
         ├── dashboardModel.test.mjs
         ├── Home.jsx
+        ├── Inquiry.jsx
+        ├── inquiryModel.js
+        ├── inquiryModel.test.mjs
         ├── Login.jsx
         ├── MarketRankings.jsx
         ├── News.jsx
@@ -291,6 +294,12 @@ frontend/
   - `Settings.jsx`와 `MobileSettings.jsx`가 공유하는 키 상태 정규화, 닉네임 검증, 거래소별 저장/테스트 payload 생성 순수 유틸
 - `settingsModel.test.mjs`
   - `settingsModel.js`의 순수 함수 Node test
+- `Inquiry.jsx`
+  - 고객센터, FAQ, 1:1 문의 등록, 문의 내역 조회/삭제를 제공하는 데스크톱 문의 화면
+- `inquiryModel.js`
+  - `Inquiry.jsx`와 `MobileInquiry.jsx`가 공유하는 문의 라벨, 첨부파일 검증, 저장 경로 생성, 목록 정렬·필터·페이지네이션, 요약/폼 검증 순수 유틸
+- `inquiryModel.test.mjs`
+  - `inquiryModel.js`의 순수 함수 Node test
 - `supabaseClient.js`, `lib/supabaseClient.js`
   - Supabase 초기화 경로가 2개 존재
   - 향후 통합 시 import 호출부 전수 확인이 필요

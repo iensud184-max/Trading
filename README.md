@@ -170,6 +170,7 @@ npm run build
 - 2026-07-15 AdminMlData 7차 리팩토링: 데스크톱/모바일 ML 관리자 모델 교체 판단 패널을 `adminMlDataPanels.jsx`로 공통화했습니다. 전체 lint 상태는 `0 errors`, `0 warnings`이며 `AdminMlData.jsx`는 2,371줄, `MobileAdminMlData.jsx`는 2,333줄입니다.
 - 2026-07-15 AdminMlData 8차 리팩토링: 데스크톱/모바일 ML 관리자 모델 레지스트리 패널을 `adminMlDataPanels.jsx`로 공통화하고 테이블/카드 레이아웃은 variant로 유지했습니다. 전체 lint 상태는 `0 errors`, `0 warnings`이며 `AdminMlData.jsx`는 2,267줄, `MobileAdminMlData.jsx`는 2,237줄입니다.
 - 2026-07-15 AdminMlData 9차 리팩토링: 데스크톱/모바일 ML 관리자 준비 상태, 실행 체크리스트, 실험 리포트 패널을 `adminMlDataPanels.jsx`로 공통화했습니다. 전체 lint 상태는 `0 errors`, `0 warnings`이며 `AdminMlData.jsx`는 2,084줄, `MobileAdminMlData.jsx`는 2,055줄입니다. 공통 패널 파일은 1,059줄로 커져 후속 분리 대상입니다.
+- 2026-07-15 AdminMlData 10차 리팩토링: 과밀해진 `adminMlDataPanels.jsx`를 배럴 파일로 축소하고 핵심 공통 패널은 `adminMlDataCorePanels.jsx`, 운영/레지스트리/리포트 패널은 `adminMlDataOperationalPanels.jsx`로 분리했습니다. 전체 lint 상태는 `0 errors`, `0 warnings`이며 새 패널 파일은 각각 283줄, 779줄입니다.
 
 ## 주요 API
 

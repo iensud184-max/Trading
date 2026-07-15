@@ -4,13 +4,25 @@ import { supabase } from '../supabaseClient'
 import AdminInquiries from './AdminInquiries.jsx'
 import AdminUsers from './AdminUsers.jsx'
 import AdminSymbolReconciliation from './AdminSymbolReconciliation.jsx'
-import { ActiveSignalPanel, AuditBadge, GuardSummary, JobLogModal, ModelSwitchPanel, RegistryPanel, ServingAuditPanel, StatusPanel, VersionDeltaPanel } from './adminMlDataPanels.jsx'
 import {
-  buildQualityDetail,
+  ActiveSignalPanel,
+  AuditBadge,
+  ExecutionChecklistPanel,
+  GuardSummary,
+  JobLogModal,
+  ModelSwitchPanel,
+  ReadinessPanel,
+  RegistryPanel,
+  ReportHistoryPanel,
+  ReportPanel,
+  ServingAuditPanel,
+  StatusPanel,
+  VersionDeltaPanel,
+} from './adminMlDataPanels.jsx'
+import {
   findGuardCheck,
   formatMetric,
   formatPath,
-  formatPathInText,
   formatPercent,
   formatReturnPercent,
   formatTime,
@@ -339,201 +351,6 @@ function JobHistoryPanel({ jobs = [], loading, error, onShowLog }) {
         </tbody>
       </table>
     </div>
-  )
-}
-
-function ReadinessItem({ label, status, detail }) {
-  return (
-    <div className="rounded-lg border border-slate-800 bg-[#0f172a] p-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-bold text-white">{label}</p>
-        <span className={`rounded border px-2 py-1 text-[10px] font-bold ${
-          status ? 'border-emerald-500/40 text-emerald-300' : 'border-amber-500/40 text-amber-300'
-        }`}>
-          {status ? '준비 완료' : '확인 필요'}
-        </span>
-      </div>
-      <p className="mt-2 break-all whitespace-pre-line font-mono text-[10px] leading-5 text-slate-500">{formatPathInText(detail)}</p>
-    </div>
-  )
-}
-
-function ReadinessPanel({ data, loading, error, onRefresh }) {
-  return (
-    <section className="rounded-lg border border-slate-700/80 bg-slate-surface p-5">
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-ai-cyan">Readiness</p>
-          <h2 className="mt-1 text-xl font-bold text-white">운영 준비 상태</h2>
-        </div>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={loading}
-          className="w-full rounded border border-slate-700 px-4 py-2 text-xs font-bold text-slate-300 transition hover:border-ai-cyan hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-        >
-          {loading ? '불러오는 중' : '준비 상태 새로고침'}
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="rounded-lg border border-slate-800 bg-[#0f172a] p-4 text-sm text-slate-400">
-          운영 준비 상태를 불러오는 중입니다.
-        </div>
-      ) : error ? (
-        <div className="rounded-lg border border-red-800 bg-red-950/30 p-4 text-sm leading-6 text-red-300">
-          {error}
-        </div>
-      ) : !data ? (
-        <div className="rounded-lg border border-slate-800 bg-[#0f172a] p-4 text-sm text-slate-400">
-          아직 준비 상태 정보가 없습니다.
-        </div>
-      ) : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <ReadinessItem
-            label="Toss 키"
-            status={data.keys?.toss_ready}
-            detail={data.keys?.toss_ready
-              ? `Supabase 저장 키를 백엔드에서 복호화해 사용 가능\nsource: ${data.keys?.toss_source || '-'}\naccountSeq: ${data.keys?.toss_account_seq_ready ? 'READY' : 'CHECK'} / env: ${data.keys?.toss_broker_env || '-'} / records: ${data.keys?.toss_record_count ?? 0}`
-              : `Toss 키 저장 또는 연결 확인 필요\nsource: ${data.keys?.toss_source || '-'}`}
-          />
-          <ReadinessItem
-            label="주식 원천 CSV"
-            status={data.datasets?.stock_raw?.quality?.status === 'healthy'}
-            detail={buildQualityDetail(data.datasets?.stock_raw)}
-          />
-          <ReadinessItem
-            label="코인 원천 CSV"
-            status={data.datasets?.crypto_raw?.quality?.status === 'healthy'}
-            detail={buildQualityDetail(data.datasets?.crypto_raw)}
-          />
-          <ReadinessItem
-            label="매크로 지표"
-            status={data.datasets?.macro_raw?.exists}
-            detail={`${data.datasets?.macro_raw?.rows ?? 0} rows\n${data.datasets?.macro_raw?.path || '-'}`}
-          />
-          <ReadinessItem
-            label="외부 피처"
-            status={Boolean(data.feature_sources?.news_features?.exists || data.feature_sources?.crypto_market_features?.exists || data.feature_sources?.stock_event_features?.exists)}
-            detail={`news ${data.feature_sources?.news_features?.rows ?? 0} / crypto ${data.feature_sources?.crypto_market_features?.rows ?? 0} / stock ${data.feature_sources?.stock_event_features?.rows ?? 0}`}
-          />
-          <ReadinessItem
-            label="SERVING 상태"
-            status={Boolean(data.registry?.stock_serving || data.registry?.crypto_serving)}
-            detail={`stock: ${data.registry?.stock_serving || '-'}\ncrypto: ${data.registry?.crypto_serving || '-'}`}
-          />
-        </div>
-      )}
-    </section>
-  )
-}
-
-function ExecutionChecklistPanel() {
-  const steps = [
-    '운영 준비 상태에서 Toss 키와 원천 CSV 상태를 먼저 확인',
-    '필요하면 CSV 생성 또는 stock-v7-full / crypto-v7-full 실행',
-    '작업 이력 success와 summary 파일 생성 여부 확인',
-    '버전 비교 표에서 SERVING / PICK / LATEST와 백테스트 비교',
-    '레지스트리 패널에서 검토 완료 버전을 서비스 반영',
-    'active-model 기준 선택 결과가 기대와 같은지 재확인',
-  ]
-
-  return (
-    <section className="rounded-lg border border-slate-700/80 bg-slate-surface p-5">
-      <div className="mb-4">
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-ai-cyan">Checklist</p>
-        <h2 className="mt-1 text-xl font-bold text-white">실행 순서</h2>
-      </div>
-      <div className="grid gap-3">
-        {steps.map((step, index) => (
-          <div key={step} className="flex gap-3 rounded-lg border border-slate-800 bg-[#0f172a] p-3">
-            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-ai-cyan/40 font-mono text-[10px] font-bold text-ai-cyan">
-              {index + 1}
-            </div>
-            <p className="text-sm leading-6 text-slate-300">{step}</p>
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-function ReportPanel({ loading, message, onGenerate }) {
-  return (
-    <section className="rounded-lg border border-slate-700/80 bg-slate-surface p-5">
-      <div className="mb-4">
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-ai-cyan">Report</p>
-        <h2 className="mt-1 text-xl font-bold text-white">실험 리포트 저장</h2>
-      </div>
-      <p className="text-sm leading-6 text-slate-400">
-        현재 summary JSON과 serving 상태를 기준으로 Markdown 리포트를 생성합니다.
-      </p>
-      <div className="mt-4">
-        <button
-          type="button"
-          onClick={onGenerate}
-          disabled={loading}
-          className="rounded border border-ai-cyan/40 px-4 py-2 text-xs font-bold text-ai-cyan transition hover:bg-ai-cyan/10 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {loading ? '리포트 생성 중...' : '리포트 생성'}
-        </button>
-      </div>
-      {message ? (
-        <div className="mt-4 rounded-lg border border-ai-cyan/30 bg-ai-cyan/5 p-4 text-sm text-ai-cyan">
-          {message}
-        </div>
-      ) : null}
-    </section>
-  )
-}
-
-function ReportHistoryPanel({ reports = [], loading, error, onRefresh }) {
-  return (
-    <section className="rounded-lg border border-slate-700/80 bg-slate-surface p-5">
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-ai-cyan">Reports</p>
-          <h2 className="mt-1 text-xl font-bold text-white">최근 실험 리포트</h2>
-        </div>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={loading}
-          className="w-full rounded border border-slate-700 px-4 py-2 text-xs font-bold text-slate-300 transition hover:border-ai-cyan hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-        >
-          {loading ? '불러오는 중' : '리포트 목록 새로고침'}
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="rounded-lg border border-slate-800 bg-[#0f172a] p-4 text-sm text-slate-400">
-          리포트 목록을 불러오는 중입니다.
-        </div>
-      ) : error ? (
-        <div className="rounded-lg border border-red-800 bg-red-950/30 p-4 text-sm leading-6 text-red-300">
-          {error}
-        </div>
-      ) : !reports.length ? (
-        <div className="rounded-lg border border-slate-800 bg-[#0f172a] p-4 text-sm text-slate-400">
-          아직 생성된 실험 리포트가 없습니다.
-        </div>
-      ) : (
-        <div className="grid gap-3">
-          {reports.map((report) => (
-            <div key={report.path} className="rounded-lg border border-slate-800 bg-[#0f172a] p-3">
-              <p className="break-all font-mono text-sm text-white">{report.name}</p>
-              <p className="mt-1 font-mono text-[10px] text-slate-500 truncate block" title={report.path}>
-                {formatPath(report.path)}
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-slate-400">
-                <span>{report.updated_at}</span>
-                <span>{report.size_bytes} bytes</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
   )
 }
 

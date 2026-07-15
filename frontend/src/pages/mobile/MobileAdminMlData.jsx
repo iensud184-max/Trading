@@ -3,7 +3,7 @@ import Header from '../../components/Header.jsx'
 import { supabase } from '../../supabaseClient'
 import MobileAdminInquiries from './MobileAdminInquiries.jsx'
 import AdminSymbolReconciliation from '../AdminSymbolReconciliation.jsx'
-import { ActiveSignalPanel, AuditBadge, GuardSummary, JobLogModal, StatusPanel, VersionDeltaPanel } from '../adminMlDataPanels.jsx'
+import { ActiveSignalPanel, AuditBadge, GuardSummary, JobLogModal, ServingAuditPanel, StatusPanel, VersionDeltaPanel } from '../adminMlDataPanels.jsx'
 import {
   buildQualityDetail,
   findGuardCheck,
@@ -227,87 +227,6 @@ function V8OptunaPanel({
           {message}
         </div>
       ) : null}
-    </section>
-  )
-}
-
-function ServingAuditPanel({ data, loading, error, onRefresh }) {
-  return (
-    <section className="rounded-lg border border-slate-700/80 bg-slate-surface p-5">
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-ai-cyan">Serving Audit</p>
-          <h2 className="mt-1 text-xl font-bold text-white">운영 모델 감사</h2>
-        </div>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={loading}
-          className="w-full rounded border border-slate-700 px-4 py-2 text-xs font-bold text-slate-300 transition hover:border-ai-cyan hover:text-white disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-        >
-          {loading ? '불러오는 중' : '감사 결과 새로고침'}
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="rounded-lg border border-slate-800 bg-[#0f172a] p-4 text-sm text-slate-400">
-          운영 감사 정보를 불러오는 중입니다.
-        </div>
-      ) : error ? (
-        <div className="rounded-lg border border-red-800 bg-red-950/30 p-4 text-sm leading-6 text-red-300">
-          {error}
-        </div>
-      ) : !data ? (
-        <div className="rounded-lg border border-slate-800 bg-[#0f172a] p-4 text-sm text-slate-400">
-          아직 운영 감사 정보가 없습니다.
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-[#0f172a] p-4">
-            <AuditBadge status={data.status}>{data.status === 'healthy' ? '전체 정상' : '즉시 확인 필요'}</AuditBadge>
-            <span className="text-sm text-slate-300">차단 항목 {data.blocking_count ?? 0}건</span>
-          </div>
-
-          <div className="grid gap-3 xl:grid-cols-2">
-            {Object.entries(data.assets || {}).map(([assetKey, report]) => (
-              <div key={assetKey} className="rounded-lg border border-slate-800 bg-[#0f172a] p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-bold text-white">{report.asset_type === 'STOCK' ? '주식 모델' : '코인 모델'}</p>
-                    <p className="mt-1 text-xs leading-5 text-slate-400">{report.message}</p>
-                  </div>
-                  <AuditBadge status={report.status} />
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-2 text-[10px]">
-                  <span className="rounded border border-fuchsia-500/30 px-2 py-1 font-bold text-fuchsia-300">SERVING {report.serving_version || '-'}</span>
-                  <span className="rounded border border-emerald-500/30 px-2 py-1 font-bold text-emerald-300">PICK {report.recommended_version || '-'}</span>
-                  <span className="rounded border border-slate-600 px-2 py-1 font-bold text-slate-300">LATEST {report.latest_version || '-'}</span>
-                </div>
-
-                {report.actions?.length ? (
-                  <div className="mt-3 space-y-1">
-                    {report.actions.map((action) => (
-                      <p key={action} className="text-[10px] leading-5 text-slate-300">{action}</p>
-                    ))}
-                  </div>
-                ) : null}
-
-                <div className="mt-4 grid gap-2">
-                  <div className="min-w-0 rounded border border-slate-800 bg-black/10 p-3">
-                    <p className="mb-2 break-keep text-[10px] font-bold uppercase tracking-wider text-slate-500">현재 서빙 기준</p>
-                    <GuardSummary guardReport={report.current_guard} compact />
-                  </div>
-                  <div className="min-w-0 rounded border border-slate-800 bg-black/10 p-3">
-                    <p className="mb-2 break-keep text-[10px] font-bold uppercase tracking-wider text-slate-500">추천 후보 기준</p>
-                    <GuardSummary guardReport={report.recommended_guard} compact />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </section>
   )
 }
@@ -1955,6 +1874,7 @@ export default function AdminMlData({ isLoggedIn, userEmail, handleLogout, hideH
           loading={servingAuditLoading}
           error={servingAuditError}
           onRefresh={loadServingAudit}
+          compactGuards
         />
 
         <ModelSwitchPanel

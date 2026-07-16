@@ -533,6 +533,38 @@ class BinanceSpotClient:
             "raw": data,
         }
 
+    def transfer_internal(self, type: str, amount: float, asset: str = "USDT") -> dict:
+        """
+        현물 지갑과 USD-M 선물 지갑 간에 자금을 내부 이체(Universal Transfer)합니다.
+        """
+        if type not in ("MAIN_UMFUTURE", "UMFUTURE_MAIN"):
+            raise ValueError("유효하지 않은 이체 방향입니다. MAIN_UMFUTURE 또는 UMFUTURE_MAIN만 가능합니다.")
+
+        try:
+            amount_val = float(amount)
+        except (ValueError, TypeError):
+            raise ValueError("이체 수량은 유효한 숫자여야 합니다.")
+
+        if amount_val <= 0:
+            raise ValueError("이체 수량은 0보다 커야 합니다.")
+
+        normalized_asset = str(asset or "").strip().upper()
+        if not normalized_asset:
+            raise ValueError("이체 자산 심볼이 필요합니다.")
+
+        params = {
+            "type": type,
+            "asset": normalized_asset,
+            "amount": f"{amount_val:.12g}",
+        }
+
+        response_json = self._signed_request("POST", "/sapi/v1/asset/transfer", params)
+        return {
+            "transaction_id": str(response_json.get("tranId")),
+            "raw": response_json,
+        }
+
+
 
 class BinanceFuturesClient:
     """

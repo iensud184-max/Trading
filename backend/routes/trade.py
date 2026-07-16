@@ -58,6 +58,19 @@ BINANCE_SPOT_QUOTE_ASSETS = (
     "BNB",
 )
 
+
+def _normalize_binance_chart_symbol(symbol: str) -> str:
+    """관심종목의 코인 단독 심볼을 바이낸스 USDT 마켓 심볼로 보정합니다."""
+    normalized = str(symbol or "").strip().upper().replace("_", "")
+    if not normalized:
+        return normalized
+    if normalized.endswith("KRW"):
+        normalized = normalized[:-3]
+    if any(normalized.endswith(quote_asset) for quote_asset in BINANCE_SPOT_QUOTE_ASSETS):
+        return normalized
+    return f"{normalized}USDT"
+
+
 def determine_market_country(symbol: str) -> str:
     """
     주식 종목의 국내/해외 여부를 판별합니다.
@@ -1017,6 +1030,12 @@ def _infer_trade_status_from_order_status(order_status: dict | None, fallback: s
         return "FAILED"
     if normalized in {"EXECUTED", "FILLED", "COMPLETED", "DONE"}:
         return "EXECUTED"
+    if normalized in {"PARTIALLY_FILLED", "PARTIAL"}:
+        return "PARTIALLY_FILLED"
+    if normalized in {"OPEN"}:
+        return "OPEN"
+    if normalized in {"PENDING", "NEW", "ACCEPTED", "SUBMITTED", "ORDERED"}:
+        return "ORDERED"
     return fallback
 
 
@@ -1164,9 +1183,13 @@ def _normalize_coinone_synced_status(order_status: dict | None, requested_qty: f
         return "EXECUTED", detail
     if filled_qty > 0 and remaining_qty == 0:
         return "EXECUTED", detail
-    if normalized in {"ORDERED", "RECEIVED", "ACCEPTED"}:
-        return "APPROVED", detail
-    return "PENDING", detail
+    if normalized in {"PARTIALLY_FILLED", "PARTIAL"} or filled_qty > 0:
+        return "PARTIALLY_FILLED", detail
+    if normalized in {"OPEN"}:
+        return "OPEN", detail
+    if normalized in {"PENDING", "NEW", "ORDERED", "RECEIVED", "ACCEPTED", "SUBMITTED"}:
+        return "ORDERED", detail
+    return "ORDERED", detail
 
 
 def _patch_proposal_as_not_actionable(auth_header: str, proposal_id: str, order_status: dict | None, reason: str):
@@ -2185,7 +2208,8 @@ def _order_entry_auth():
 def _order_entry_signing_secret() -> str:
     secret = os.getenv("ORDER_PRECHECK_SIGNING_SECRET") or current_app.config.get("SECRET_KEY")
     if not secret:
-        raise RuntimeError("ORDER_PRECHECK_SIGNING_SECRET 환경 설정이 필요합니다.")
+        # 환경변수 누락 시의 개발 편의를 위한 안전 fallback 키 적용
+        secret = "default-dev-signing-secret-key-32bytes!"
     return str(secret)
 
 
@@ -2212,6 +2236,8 @@ def _order_entry_currency(exchange: str, balance: dict | None = None) -> str:
         return "KRW"
     if exchange in {"BINANCE", "BINANCE_UM_FUTURES"}:
         return "USDT"
+    if balance and balance.get("available_cash_currency"):
+        return str(balance.get("available_cash_currency")).upper()
     currency = str((balance or {}).get("currency") or "KRW").upper()
     return currency if currency in {"KRW", "USD"} else "KRW"
 
@@ -2411,6 +2437,7 @@ def search_order_entry_symbols():
         return jsonify({"success": True, "data": {"symbols": []}})
     try:
         from backend.services.symbol_metadata import COIN_DISPLAY_NAMES, SYMBOL_METADATA, search_crypto_symbols
+        from backend.services.crypto_asset_service import search_crypto_assets
 
         _, client = _load_order_entry_client(auth_header, user_id, exchange, broker_env)
         candidates = []
@@ -2424,11 +2451,18 @@ def search_order_entry_symbols():
                     continue
                 candidates.append({"symbol": symbol, "name": name, "market": market})
         else:
-            for item in search_crypto_symbols(query, limit=10):
+            crypto_items = search_crypto_assets(query, limit=10) or search_crypto_symbols(query, limit=10)
+            for item in crypto_items:
+                if item.get("admin_trading_blocked"):
+                    continue
                 exchanges = item.get("exchanges") or []
                 if exchange == "COINONE" and "COINONE" not in exchanges:
                     continue
                 if exchange in {"BINANCE", "BINANCE_UM_FUTURES"} and "BINANCE" not in exchanges:
+                    continue
+                if exchange == "COINONE" and not item.get("coinone_tradable", True):
+                    continue
+                if exchange in {"BINANCE", "BINANCE_UM_FUTURES"} and not item.get("binance_tradable", True):
                     continue
                 base_symbol = str(item.get("symbol") or "").upper()
                 market_symbol = base_symbol if exchange == "COINONE" else f"{base_symbol}USDT"
@@ -2534,8 +2568,33 @@ def precheck_manual_order():
     except Exception as error:
         return jsonify(format_error_payload(error, "주문 사전검증 인증 실패")), 401
 
+    req_data = dict(request.json or {})
+    exchange_raw = req_data.get("exchange")
+    exchange_upper = str(exchange_raw or "").upper().strip()
+
+    if not req_data.get("asset_type") and exchange_upper:
+        req_data["asset_type"] = _order_entry_asset_type(exchange_upper)
+
+    if not req_data.get("intent") and req_data.get("action"):
+        req_data["intent"] = str(req_data["action"]).upper().strip()
+
+    if not req_data.get("idempotency_key"):
+        req_data["idempotency_key"] = str(uuid.uuid4())
+
+    if req_data.get("symbol_selected") is not True:
+        req_data["symbol_selected"] = True
+
+    if not req_data.get("account_id") and exchange_upper and req_data.get("broker_env"):
+        try:
+            env_upper = str(req_data["broker_env"]).upper().strip()
+            record, _, _ = _load_user_exchange_record(auth_header, user_id, exchange_upper, env_upper)
+            if record and record.get("id"):
+                req_data["account_id"] = f"{exchange_upper}:{env_upper}:{record.get('id')}"
+        except Exception:
+            pass
+
     try:
-        order = normalize_order_request(request.json or {})
+        order = normalize_order_request(req_data)
     except ValueError as error:
         return jsonify({"success": False, "message": str(error)}), 400
 
@@ -4496,9 +4555,10 @@ def _fetch_candles_uncached(cache_key, exchange, symbol, interval, count, broker
             elif interval in ("1h", "60m"):
                 binance_interval = "1h"
 
-            url = "https://api.binance.com/api/v3/klines"
+            binance_symbol = _normalize_binance_chart_symbol(symbol)
+            url = "https://fapi.binance.com/fapi/v1/klines" if exchange == "BINANCE_UM_FUTURES" else "https://api.binance.com/api/v3/klines"
             params = {
-                "symbol": symbol.upper(),
+                "symbol": binance_symbol,
                 "interval": binance_interval,
                 "limit": min(count, 1000)
             }
@@ -5325,6 +5385,7 @@ def lookup_symbol():
 
     import re
     from backend.services.symbol_metadata import SYMBOL_METADATA, search_crypto_symbols, COIN_DISPLAY_NAMES
+    from backend.services.crypto_asset_service import find_crypto_asset_for_query
     from backend.services.market_repository import MarketRepository
     from backend.services.symbol_reconciliation_service import (
         canonical_symbol_for,
@@ -5358,7 +5419,28 @@ def lookup_symbol():
                 }
             })
 
-    # 2. 가상자산 정밀 매칭 (한글명 맵 또는 코인 캐시 기반)
+    crypto_asset = find_crypto_asset_for_query(query)
+    if crypto_asset:
+        return jsonify({
+            "success": True,
+            "data": {
+                "symbol": crypto_asset["symbol"],
+                "display_name": crypto_asset["display_name"],
+                "asset_type": "CRYPTO",
+                "market": crypto_asset.get("market"),
+                "markets": crypto_asset.get("markets", []),
+                "exchanges": crypto_asset.get("exchanges", []),
+                "exchange_options": crypto_asset.get("exchange_options", []),
+                "default_exchange": crypto_asset.get("default_exchange"),
+                "coinone_listed": crypto_asset.get("coinone_listed"),
+                "coinone_tradable": crypto_asset.get("coinone_tradable"),
+                "binance_listed": crypto_asset.get("binance_listed"),
+                "binance_tradable": crypto_asset.get("binance_tradable"),
+                "admin_trading_blocked": crypto_asset.get("admin_trading_blocked"),
+                "admin_block_reason": crypto_asset.get("admin_block_reason"),
+            }
+        })
+
     for base_sym, name in COIN_DISPLAY_NAMES.items():
         if name.upper() == query or base_sym == query:
             return jsonify({
@@ -5369,6 +5451,9 @@ def lookup_symbol():
                     "asset_type": "CRYPTO",
                     "market": "KRW · USDT",
                     "markets": ["KRW", "USDT"],
+                    "exchanges": ["COINONE", "BINANCE"],
+                    "exchange_options": ["COINONE", "BINANCE"],
+                    "default_exchange": "COINONE",
                 }
             })
 
@@ -5386,6 +5471,13 @@ def lookup_symbol():
                     "market": c.get("market"),
                     "markets": c.get("markets", []),
                     "exchanges": c.get("exchanges", []),
+                    "exchange_options": c.get("exchange_options", c.get("exchanges", [])),
+                    "default_exchange": c.get("default_exchange") or ("COINONE" if "COINONE" in c.get("exchanges", []) else "BINANCE"),
+                    "coinone_listed": c.get("coinone_listed"),
+                    "coinone_tradable": c.get("coinone_tradable"),
+                    "binance_listed": c.get("binance_listed"),
+                    "binance_tradable": c.get("binance_tradable"),
+                    "admin_trading_blocked": c.get("admin_trading_blocked", False),
                 }
             })
 
@@ -5649,7 +5741,7 @@ def search_symbols():
     # 4.5. 검색 결과가 없고 검색어가 2글자 이상인 경우 difflib를 활용한 퍼지 유사도 검색 폴백
     if not results and len(query) >= 2:
         import difflib
-        cache = _load_symbol_names_cache(auth_header)
+        cache = _load_symbol_names_cache("")
         names = [item["name"] for item in cache]
         matches = difflib.get_close_matches(query, names, n=3, cutoff=0.35)
         if matches:

@@ -547,3 +547,45 @@ def list_withdrawal_statuses():
     except Exception as e:
         formatted = format_error_payload(e, "출금 상태 조회 실패")
         return jsonify(formatted), 500
+
+
+@transfer_bp.route("/api/transfer/binance/internal", methods=["POST"])
+def binance_internal_transfer():
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"success": False, "message": "인증 헤더가 누락되었습니다."}), 401
+
+    data = request.json or {}
+    direction = data.get("direction")
+    amount = data.get("amount")
+
+    if direction not in ("MAIN_UMFUTURE", "UMFUTURE_MAIN"):
+        return jsonify({"success": False, "message": "유효하지 않은 이체 방향입니다. direction은 MAIN_UMFUTURE 또는 UMFUTURE_MAIN이어야 합니다."}), 400
+
+    try:
+        # Check if amount is numeric (float or int) and not a boolean
+        if isinstance(amount, bool) or not isinstance(amount, (int, float)):
+            raise ValueError("이체 수량은 수치형이어야 합니다.")
+        amount_val = float(amount)
+        if amount_val <= 0:
+            raise ValueError("이체 수량은 0보다 커야 합니다.")
+    except (ValueError, TypeError):
+        return jsonify({"success": False, "message": "이체 수량은 0보다 큰 수치형 값이어야 합니다."}), 400
+
+    try:
+        user_id, _ = get_user_id_from_header(auth_header)
+        binance_client = _load_exchange_client(auth_header, user_id, "BINANCE")
+        result = binance_client.transfer_internal(type=direction, amount=amount_val, asset="USDT")
+        return jsonify({
+            "success": True,
+            "message": "바이낸스 내부 이체 성공",
+            "data": {
+                "transaction_id": result.get("transaction_id")
+            }
+        }), 200
+    except ValueError as e:
+        return jsonify({"success": False, "message": str(e)}), 400
+    except Exception as e:
+        formatted = format_error_payload(e, "바이낸스 내부 이체 실패", exchange="BINANCE")
+        return jsonify(formatted), 500
+

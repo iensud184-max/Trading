@@ -29,6 +29,7 @@ export default function AssetsTab({
   showMockAssets = true,
   setShowMockAssets,
   balanceLoading = false,
+  loadAccountBalance,
 }) {
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' })
   const [withdrawAsset, setWithdrawAsset] = useState(null)
@@ -45,6 +46,104 @@ export default function AssetsTab({
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false)
   const [transferRows, setTransferRows] = useState([])
   const [transferLoading, setTransferLoading] = useState(false)
+
+  const [internalTransferOpen, setInternalTransferOpen] = useState(false)
+  const [transferDirection, setTransferDirection] = useState('MAIN_UMFUTURE')
+  const [transferAmount, setTransferAmount] = useState('')
+  const [transferConfirm, setTransferConfirm] = useState(false)
+  const [transferMessage, setTransferMessage] = useState({ text: '', isError: false, detail: '' })
+  const [transferSubmitting, setTransferSubmitting] = useState(false)
+
+  const openInternalTransferModal = () => {
+    setInternalTransferOpen(true)
+    setTransferDirection('MAIN_UMFUTURE')
+    setTransferAmount('')
+    setTransferConfirm(false)
+    setTransferMessage({ text: '', isError: false, detail: '' })
+  }
+
+  const closeInternalTransferModal = () => {
+    setInternalTransferOpen(false)
+    setTransferMessage({ text: '', isError: false, detail: '' })
+  }
+
+  const getBinanceAvailableCash = (direction) => {
+    const targetExchange = direction === 'MAIN_UMFUTURE' ? 'BINANCE' : 'BINANCE_UM_FUTURES'
+    const account = accountBalances.find((acc) => {
+      const matchExchange = String(acc.raw_exchange || acc.exchange || '').toUpperCase() === targetExchange
+      const isMock = String(acc.env || '').toUpperCase() === 'MOCK'
+      return matchExchange && !isMock
+    })
+    return account ? Number(account.available_cash || 0) : 0
+  }
+
+  const handleInternalTransferSubmit = async (e) => {
+    if (e) e.preventDefault()
+    
+    const authHeader = await getAuthHeader()
+    if (!authHeader) {
+      setTransferMessage({ text: '로그인이 필요합니다.', isError: true, detail: '' })
+      return
+    }
+
+    const amountNum = Number(transferAmount)
+    if (!transferAmount || isNaN(amountNum) || amountNum <= 0) {
+      setTransferMessage({ text: '올바른 수량을 입력해주세요.', isError: true, detail: '' })
+      return
+    }
+
+    const availableCash = getBinanceAvailableCash(transferDirection)
+    if (amountNum > availableCash) {
+      setTransferMessage({ text: '잔고가 부족합니다.', isError: true, detail: '' })
+      return
+    }
+
+    if (!transferConfirm) {
+      setTransferMessage({ text: '최종 이체 동의 체크가 필요합니다.', isError: true, detail: '' })
+      return
+    }
+
+    setTransferSubmitting(true)
+    setTransferMessage({ text: '', isError: false, detail: '' })
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/transfer/binance/internal`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({
+          direction: transferDirection,
+          amount: amountNum,
+        }),
+      })
+
+      const payload = await response.json()
+      if (!response.ok || !payload.success) {
+        throw payload
+      }
+
+      setTransferMessage({ text: '이체가 성공적으로 완료되었습니다.', isError: false, detail: '' })
+      
+      if (loadAccountBalance) {
+        await loadAccountBalance()
+      }
+
+      setTimeout(() => {
+        closeInternalTransferModal()
+        setTransferSubmitting(false)
+      }, 1500)
+    } catch (error) {
+      const message = getApiErrorMessage(error, '바이낸스 내부 이체에 실패했습니다.')
+      setTransferMessage({
+        text: message.title,
+        detail: message.detail,
+        isError: true,
+      })
+      setTransferSubmitting(false)
+    }
+  }
 
   const handleSort = (key) => {
     let direction = 'asc'
@@ -329,9 +428,20 @@ export default function AssetsTab({
                     <p className="mt-2 text-xs text-slate-500">{account.sourceText}</p>
                   ) : null}
                 </div>
-                <div className="md:text-right">
-                  <p className="text-xs font-bold text-slate-500">{account.balanceLabel}</p>
-                  <p className="mt-1 text-xl font-extrabold text-white font-mono">{account.balance}</p>
+                <div className="flex flex-col items-start md:items-end gap-2 shrink-0">
+                  <div className="md:text-right">
+                    <p className="text-xs font-bold text-slate-500">{account.balanceLabel}</p>
+                    <p className="mt-1 text-xl font-extrabold text-white font-mono">{account.balance}</p>
+                  </div>
+                  {!showMockAssets && (account.id === 'binance-crypto' || account.sources?.has('BINANCE') || account.sources?.has('BINANCE_UM_FUTURES') || (account.sourceText && (account.sourceText.includes('BINANCE') || account.sourceText.includes('BINANCE_UM_FUTURES')))) && (
+                    <button
+                      type="button"
+                      onClick={openInternalTransferModal}
+                      className="rounded border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-[11px] font-bold text-cyan-200 transition hover:border-cyan-300 hover:bg-cyan-500/20 cursor-pointer"
+                    >
+                      바이낸스 내부 이체
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -675,6 +785,159 @@ export default function AssetsTab({
                     )}
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {internalTransferOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4 py-8 backdrop-blur-sm">
+          <div className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-slate-700/80 bg-[#0b1220] p-5 shadow-2xl">
+            <div className="flex flex-col gap-3 border-b border-slate-800 pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-300">Binance Internal Transfer</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-white">바이낸스 내부 이체</h2>
+                  <span className="bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-0.5 rounded text-[10px] font-bold shrink-0">실거래 전용</span>
+                </div>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  바이낸스 현물(Spot) 계좌와 USD-M 선물(Futures) 계좌 간에 자금을 즉시 이체합니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeInternalTransferModal}
+                className="rounded border border-slate-700 px-3 py-1.5 text-xs font-bold text-slate-300 transition hover:border-cyan-500/40 hover:text-white cursor-pointer"
+              >
+                닫기
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              {/* 이체 방향 토글 */}
+              <div className="rounded-xl border border-slate-800 bg-[#0f172a] p-4 space-y-3">
+                <p className="text-xs font-bold text-slate-300">이체 방향</p>
+                <div className="grid grid-cols-2 gap-2 p-1 rounded-lg bg-[#070b19] border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTransferDirection('MAIN_UMFUTURE')
+                      setTransferAmount('')
+                      setTransferConfirm(false)
+                    }}
+                    className={`py-2 text-xs font-bold rounded transition-all cursor-pointer ${
+                      transferDirection === 'MAIN_UMFUTURE'
+                        ? 'bg-slate-700 text-white shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    현물 (Spot) ➡️ 선물 (Futures)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTransferDirection('UMFUTURE_MAIN')
+                      setTransferAmount('')
+                      setTransferConfirm(false)
+                    }}
+                    className={`py-2 text-xs font-bold rounded transition-all cursor-pointer ${
+                      transferDirection === 'UMFUTURE_MAIN'
+                        ? 'bg-slate-700 text-white shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    선물 (Futures) ➡️ 현물 (Spot)
+                  </button>
+                </div>
+              </div>
+
+              {/* 보유 잔고 표시 및 수량 입력 */}
+              <div className="rounded-xl border border-slate-800 bg-[#0f172a] p-4 space-y-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-300">이체 가능 잔고</span>
+                  <span className="font-mono font-bold text-cyan-300">
+                    {getBinanceAvailableCash(transferDirection).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} USDT
+                  </span>
+                </div>
+                
+                <div className="flex flex-col gap-1.5 text-xs font-bold text-slate-300">
+                  <span>이체 수량 (USDT)</span>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      step="any"
+                      value={transferAmount}
+                      onChange={(e) => {
+                        setTransferAmount(e.target.value)
+                        setTransferConfirm(false)
+                      }}
+                      placeholder="이체할 USDT 수량 입력"
+                      className="flex-1 rounded border border-slate-700 bg-[#070b19] px-3 py-2 font-mono text-sm text-white outline-none transition focus:border-cyan-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTransferAmount(String(getBinanceAvailableCash(transferDirection)))
+                        setTransferConfirm(false)
+                      }}
+                      className="rounded border border-slate-700 px-3 py-2 text-xs font-bold text-slate-300 hover:border-cyan-500/40 hover:text-white cursor-pointer"
+                    >
+                      최대
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 경고 및 동의 체크박스 */}
+              <label className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-xs leading-5 text-red-100 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={transferConfirm}
+                  onChange={(e) => setTransferConfirm(e.target.checked)}
+                  className="mt-1 accent-red-400 cursor-pointer"
+                />
+                <span>
+                  현물 지갑과 선물 지갑 간에 자금이 즉시 이동하며, 취소할 수 없습니다.
+                </span>
+              </label>
+
+              {/* 상태 메시지 */}
+              {transferMessage.text ? (
+                <div className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                  transferMessage.isError
+                    ? 'border-red-500/30 bg-red-500/10 text-red-200'
+                    : 'border-cyan-500/30 bg-cyan-500/10 text-cyan-100'
+                }`}>
+                  <div>{transferMessage.text}</div>
+                  {transferMessage.detail ? (
+                    <div className="mt-1 text-[11px] font-medium leading-5 text-slate-200">
+                      {transferMessage.detail}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* 버튼 그룹 */}
+              <div className="flex gap-2 justify-end border-t border-slate-800 pt-4">
+                <button
+                  type="button"
+                  onClick={closeInternalTransferModal}
+                  className="rounded border border-slate-700 px-4 py-2 text-xs font-bold text-slate-300 hover:border-cyan-500/40 hover:text-white cursor-pointer"
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  onClick={handleInternalTransferSubmit}
+                  disabled={transferSubmitting || !transferConfirm || !transferAmount || Number(transferAmount) <= 0}
+                  className="rounded bg-cyan-500/90 px-4 py-2 text-xs font-extrabold text-slate-950 transition hover:bg-cyan-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5"
+                >
+                  {transferSubmitting && (
+                    <span className="h-3 w-3 animate-spin rounded-full border border-slate-950 border-t-transparent" />
+                  )}
+                  {transferSubmitting ? '이체 진행 중' : '이체 실행'}
+                </button>
               </div>
             </div>
           </div>

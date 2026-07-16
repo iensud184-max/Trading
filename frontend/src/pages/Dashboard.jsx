@@ -1154,6 +1154,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
               showMockAssets={showMockAssets}
               setShowMockAssets={setShowMockAssets}
               balanceLoading={balanceLoading}
+              loadAccountBalance={loadAccountBalance}
             />
           )}
           {activeTab === 'history' && <TradeHistoryTab />}

@@ -326,6 +326,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
 
   const [hoverData, setHoverData] = useState(null)
   const [defaultLegendData, setDefaultLegendData] = useState(null)
+  const [tradingMarkers, setTradingMarkers] = useState([])
 
   const chartContainerRef = useRef(null)
   const chartRef = useRef(null)
@@ -2422,6 +2423,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
     
     try {
       const { data: { session } } = await supabase.auth.getSession()
+      if (!candleSeriesRef.current) return
       if (!session?.user?.id) return
 
       // Query executed histories from trade_proposals
@@ -2433,9 +2435,10 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
         .or(buildSymbolOrFilter())
         .order('executed_at', { ascending: true })
 
+      if (!candleSeriesRef.current) return
       if (error) throw error
       if (!data || data.length === 0) {
-        candleSeriesRef.current.setMarkers([])
+        setTradingMarkers([])
         return
       }
 
@@ -2448,17 +2451,24 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
         return {
           time: timeVal,
           position: isBuy ? 'belowBar' : 'aboveBar',
-          color: isBuy ? '#10b981' : '#ef4444',
+          color: isBuy ? '#ef4444' : '#3b82f6',
           shape: isBuy ? 'arrowUp' : 'arrowDown',
           text: isBuy ? 'BUY' : 'SELL',
         }
       })
 
-      candleSeriesRef.current.setMarkers(markers)
+      setTradingMarkers(markers)
     } catch (err) {
       console.error('Failed to load trading markers:', err)
     }
   })
+
+  // Hook to reload trading markers on dependency changes to optimize Supabase traffic
+  useEffect(() => {
+    if (symbolLookupReady) {
+      loadTradingMarkers()
+    }
+  }, [symbol, exchange, brokerEnv, symbolLookupReady])
 
   // 4. Update chart data and apply fitContent only on initial load
   useEffect(() => {
@@ -2501,8 +2511,10 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
         changeRate: lastChangeRate
       })
 
-      // 5. Load and draw trading markers
-      loadTradingMarkers()
+      // 5. Draw trading markers from state
+      if (candleSeriesRef.current) {
+        candleSeriesRef.current.setMarkers(tradingMarkers)
+      }
 
       // Synchronize container size once more after data loads successfully
       if (chartContainerRef.current) {
@@ -2518,7 +2530,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
     } catch (err) {
       console.error('차트 데이터 갱신 실패:', err)
     }
-  }, [candleData, isChartExpanded])
+  }, [candleData, isChartExpanded, tradingMarkers])
 
   useEffect(() => {
     if (!candleSeriesRef.current) return

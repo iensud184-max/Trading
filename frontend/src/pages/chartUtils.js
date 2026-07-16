@@ -32,14 +32,14 @@ export function getVolumeColor(candle, prevCandle) {
   const currentOpen = candle.open ?? 0;
   
   if (currentClose > currentOpen) {
-    return '#10b981'; // Bullish green
+    return '#ef4444'; // Bullish red
   } else if (currentClose < currentOpen) {
-    return '#ef4444'; // Bearish red
+    return '#3b82f6'; // Bearish blue
   }
   
   // Compare with previous candle if open and close are equal
   if (prevCandle && currentClose < (prevCandle.close ?? 0)) {
-    return '#ef4444';
+    return '#3b82f6';
   }
-  return '#10b981';
+  return '#ef4444';
 }

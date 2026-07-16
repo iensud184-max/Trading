@@ -20,9 +20,9 @@ try {
   assert.strictEqual(sma3[3].value, 14, 'SMA of 12,14,16 should be 14');
 
   // Test getVolumeColor
-  assert.strictEqual(getVolumeColor({ close: 15, open: 10 }, null), '#10b981');
-  assert.strictEqual(getVolumeColor({ close: 8, open: 10 }, null), '#ef4444');
-  assert.strictEqual(getVolumeColor({ close: 10, open: 10 }, { close: 8 }), '#10b981');
+  assert.strictEqual(getVolumeColor({ close: 15, open: 10 }, null), '#ef4444');
+  assert.strictEqual(getVolumeColor({ close: 8, open: 10 }, null), '#3b82f6');
+  assert.strictEqual(getVolumeColor({ close: 10, open: 10 }, { close: 8 }), '#ef4444');
   
   console.log('All tests passed successfully!');
 } catch (error) {

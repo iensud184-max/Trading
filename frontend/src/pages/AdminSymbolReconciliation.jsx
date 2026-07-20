@@ -45,6 +45,7 @@ export default function AdminSymbolReconciliation() {
   const [deleteConfirm, setDeleteConfirm] = useState(null)
   const [editingStock, setEditingStock] = useState(null)
   const [stockActionLoading, setStockActionLoading] = useState(false)
+  const [visibleStockCount, setVisibleStockCount] = useState(10)
 
   const authHeaders = useCallback(async () => {
     const { data } = await supabase.auth.getSession()
@@ -66,6 +67,7 @@ export default function AdminSymbolReconciliation() {
       setRun(payload.data?.run || null)
       setItems(payload.data?.items || [])
       setSelected({})
+      setVisibleStockCount(10)
     } catch (requestError) {
       setError(requestError.message || '종목 정리 결과를 불러오지 못했습니다.')
     } finally {
@@ -248,7 +250,7 @@ export default function AdminSymbolReconciliation() {
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex flex-wrap gap-2">
                 {Object.entries(STATUS_LABELS).map(([status, label]) => (
-                  <button key={status} type="button" onClick={() => setStatusFilter(status)} className={`rounded px-3 py-1.5 text-xs font-bold transition ${statusFilter === status ? 'bg-ai-cyan text-[#07111f]' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>
+                  <button key={status} type="button" onClick={() => { setStatusFilter(status); setVisibleStockCount(10); }} className={`rounded px-3 py-1.5 text-xs font-bold transition ${statusFilter === status ? 'bg-ai-cyan text-[#07111f]' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>
                     {label}
                   </button>
                 ))}
@@ -294,7 +296,7 @@ export default function AdminSymbolReconciliation() {
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map((item) => {
+                {filteredItems.slice(0, visibleStockCount).map((item) => {
                   const key = `${item.source_table}:${item.symbol}`
                   return (
                     <tr key={key} className="border-t border-slate-800/80 text-slate-300">
@@ -337,6 +339,14 @@ export default function AdminSymbolReconciliation() {
             {!loading && filteredItems.length === 0 ? <p className="px-4 py-8 text-center text-sm text-slate-500">표시할 스캔 결과가 없습니다.</p> : null}
             {loading ? <p className="px-4 py-8 text-center text-sm text-slate-500">스캔 결과를 불러오는 중입니다...</p> : null}
           </div>
+
+          {visibleStockCount < filteredItems.length && (
+            <div className="mt-4 flex justify-center">
+              <button type="button" onClick={() => setVisibleStockCount((prev) => prev + 10)} className="rounded border border-slate-700 bg-slate-800/40 px-6 py-2.5 text-xs font-bold text-slate-300 transition hover:border-ai-cyan hover:text-white active:scale-95">
+                더보기 ({visibleStockCount} / {filteredItems.length})
+              </button>
+            </div>
+          )}
 
           <AdminDeleteConfirmModal deleteConfirm={deleteConfirm} actionLoading={actionLoading} onCancel={() => setDeleteConfirm(null)} onConfirm={confirmDeleteAction} />
           <AdminStockAssetEditModal editingStock={editingStock} setEditingStock={setEditingStock} saveStockAsset={saveStockAsset} stockActionLoading={stockActionLoading} />

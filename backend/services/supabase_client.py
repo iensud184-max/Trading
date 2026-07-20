@@ -1,12 +1,26 @@
 import os
 import json
 import logging
+import time
 import requests
 from pathlib import Path
 from dotenv import load_dotenv
 from backend.services.auth_service import get_user_id_from_header
 
 logger = logging.getLogger(__name__)
+
+# Supabase 연결 타임아웃 설정
+# Free tier cold start 고려: connect 5초, read 20초
+_SUPABASE_CONNECT_TIMEOUT = 5
+_SUPABASE_READ_TIMEOUT = 20
+_SUPABASE_TIMEOUT = (_SUPABASE_CONNECT_TIMEOUT, _SUPABASE_READ_TIMEOUT)
+# 재시도 정사
+_SUPABASE_MAX_RETRIES = 3        # 최대 3회 재시도
+_SUPABASE_RETRY_BACKOFF = 1.5    # 최초 1.5초 대기, 이후 지수 배율
+_SUPABASE_RETRY_ON = (           # 재시도 대상 예외
+    requests.exceptions.Timeout,
+    requests.exceptions.ConnectionError,
+)
 
 PROJECT_ROOT = Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -15,6 +29,65 @@ load_dotenv(PROJECT_ROOT / "backend" / ".env")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+
+def _supabase_request_with_retry(
+    method: str,
+    url: str,
+    headers: dict,
+    json_data: dict | None = None,
+    params: dict | None = None,
+    timeout: tuple = _SUPABASE_TIMEOUT,
+    max_retries: int = _SUPABASE_MAX_RETRIES,
+) -> requests.Response:
+    """
+    Supabase REST 요청을 지수 백오프 재시도와 함께 실행합니다.
+    timeout: (connect_timeout, read_timeout) 튀 지정
+    """
+    method_upper = method.upper()
+    last_exc: Exception | None = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            if method_upper == "GET":
+                res = requests.get(url, headers=headers, params=params, timeout=timeout)
+            elif method_upper == "POST":
+                res = requests.post(url, headers=headers, json=json_data, params=params, timeout=timeout)
+            elif method_upper == "PATCH":
+                res = requests.patch(url, headers=headers, json=json_data, params=params, timeout=timeout)
+            elif method_upper == "PUT":
+                res = requests.put(url, headers=headers, json=json_data, params=params, timeout=timeout)
+            elif method_upper == "DELETE":
+                res = requests.delete(url, headers=headers, params=params, timeout=timeout)
+            else:
+                raise ValueError("지원하지 않는 HTTP 메소드입니다.")
+            return res  # 성공 시 즉시 반환
+        except _SUPABASE_RETRY_ON as exc:
+            last_exc = exc
+            wait = _SUPABASE_RETRY_BACKOFF * (2 ** (attempt - 1))  # 1.5s, 3s, 6s
+            is_timeout = isinstance(exc, requests.exceptions.Timeout)
+            logger.warning(
+                "Supabase %s %s %s (시도 %d/%d) — %.1f초 후 재시도합니다.",
+                method_upper,
+                url,
+                "Read Timeout" if is_timeout else "ConnectionError",
+                attempt,
+                max_retries,
+                wait,
+            )
+            if attempt < max_retries:
+                time.sleep(wait)
+
+    # 모든 재시도 실패
+    exc_type = type(last_exc).__name__
+    if isinstance(last_exc, requests.exceptions.Timeout):
+        raise requests.exceptions.Timeout(
+            f"Supabase 연결이 {_SUPABASE_MAX_RETRIES}회 시도 후에도 응답하지 않습니다 (read timeout={_SUPABASE_READ_TIMEOUT}s). "
+            "Supabase 대시보드에서 DB 절전(고절) 여부를 확인하거나 잠시 후 다시 시도하세요."
+        ) from last_exc
+    raise requests.exceptions.ConnectionError(
+        f"Supabase 연결에 실패했습니다 ({exc_type}). 네트워크 상태를 확인하세요."
+    ) from last_exc
+
 
 def query_supabase(
     auth_header: str,
@@ -26,12 +99,13 @@ def query_supabase(
 ) -> any:
     """
     사용자의 JWT 토큰을 릴레이하여 Supabase REST API를 직접 호출합니다.
+    타임아웃 및 연결 오류 시 최대 3회 지수 백오프로 재시도합니다.
     """
     user_id, token = get_user_id_from_header(auth_header)
     url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
-    
-    # 로컬 개발 및 테스트 모드에서의 JWT 서명 불일치 에러(401) 방지를 위해
-    # debug 또는 TESTING 모드에서는 service_role 키를 릴레이하여 RLS를 우회하되, 
+
+    # 로컀 개발 및 테스트 모드에서의 JWT 서명 불일치 에러(401) 방지를 위해
+    # debug 또는 TESTING 모드에서는 service_role 키를 릴레이하여 RLS를 우회하되,
     # user_id 필터를 명시적으로 제공하여 데이터 격리를 실현합니다.
     use_service_role = False
     try:
@@ -40,11 +114,11 @@ def query_supabase(
             use_service_role = True
     except Exception:
         pass
-        
+
     supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") if use_service_role else SUPABASE_ANON_KEY
     if not supabase_key:
         supabase_key = SUPABASE_ANON_KEY
-        
+
     headers = {
         "apikey": supabase_key,
         "Authorization": f"Bearer {supabase_key}" if use_service_role else f"Bearer {token}",
@@ -55,23 +129,23 @@ def query_supabase(
             if str(header_name).casefold() != "prefer":
                 raise ValueError("추가 Supabase 헤더는 Prefer만 허용됩니다.")
             headers["Prefer"] = header_value
-    
-    if method == "GET":
-        res = requests.get(url, headers=headers, params=params)
-    elif method == "POST":
-        res = requests.post(url, headers=headers, json=json_data, params=params)
-    elif method == "PATCH":
-        res = requests.patch(url, headers=headers, json=json_data, params=params)
-    elif method == "PUT":
-        res = requests.put(url, headers=headers, json=json_data, params=params)
-    elif method == "DELETE":
-        res = requests.delete(url, headers=headers, params=params)
-    else:
-        raise ValueError("지원하지 않는 HTTP 메소드입니다.")
-    
+
+    try:
+        res = _supabase_request_with_retry(
+            method=method,
+            url=url,
+            headers=headers,
+            json_data=json_data,
+            params=params,
+        )
+    except requests.exceptions.Timeout as exc:
+        raise Exception(str(exc)) from exc
+    except requests.exceptions.ConnectionError as exc:
+        raise Exception(str(exc)) from exc
+
     if res.status_code not in (200, 201, 204):
         raise Exception(f"Supabase REST API 에러 ({res.status_code}): {res.text}")
-    
+
     if res.text:
         try:
             return res.json()
@@ -299,18 +373,20 @@ def query_supabase_as_service_role(endpoint: str, method: str = "GET", json_data
         "Content-Type": "application/json"
     }
     
-    if method == "GET":
-        res = requests.get(url, headers=headers, params=params, timeout=SERVICE_ROLE_TIMEOUT_SECONDS)
-    elif method == "POST":
-        res = requests.post(url, headers=headers, json=json_data, params=params, timeout=SERVICE_ROLE_TIMEOUT_SECONDS)
-    elif method == "PATCH":
-        res = requests.patch(url, headers=headers, json=json_data, params=params, timeout=SERVICE_ROLE_TIMEOUT_SECONDS)
-    elif method == "PUT":
-        res = requests.put(url, headers=headers, json=json_data, params=params, timeout=SERVICE_ROLE_TIMEOUT_SECONDS)
-    elif method == "DELETE":
-        res = requests.delete(url, headers=headers, params=params, timeout=SERVICE_ROLE_TIMEOUT_SECONDS)
-    else:
-        raise ValueError("지원하지 않는 HTTP 메소드입니다.")
+    try:
+        res = _supabase_request_with_retry(
+            method=method,
+            url=url,
+            headers=headers,
+            json_data=json_data,
+            params=params,
+            timeout=(_SUPABASE_CONNECT_TIMEOUT, SERVICE_ROLE_TIMEOUT_SECONDS),
+            max_retries=_SUPABASE_MAX_RETRIES,
+        )
+    except requests.exceptions.Timeout as exc:
+        raise Exception(str(exc)) from exc
+    except requests.exceptions.ConnectionError as exc:
+        raise Exception(str(exc)) from exc
         
     if res.status_code not in (200, 201, 204):
         raise Exception(f"Supabase REST API service_role 에러 ({res.status_code}): {res.text}")

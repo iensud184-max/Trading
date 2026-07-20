@@ -1,10 +1,16 @@
-import { useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabaseClient'
 
 export default function Login() {
   const navigate = useNavigate()
-  
+  const [loading, setLoading] = useState(false)
+  const [loginInputs, setLoginInputs] = useState({
+    email: '',
+    password: '',
+    rememberMe: false
+  })
+
   // 세션 감지하여 이미 로그인되어 있으면 대시보드로 리다이렉트
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -13,6 +19,32 @@ export default function Login() {
       }
     })
   }, [navigate])
+
+  const handleLoginInputChange = (e) => {
+    const { name, value, type, checked } = e.target
+    setLoginInputs(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }))
+  }
+
+  // 일반 이메일 로그인 수행
+  const handleEmailLogin = async (e) => {
+    e.preventDefault()
+    setLoading(true)
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: loginInputs.email,
+        password: loginInputs.password
+      })
+      if (error) throw error
+      navigate('/')
+    } catch (err) {
+      alert(`로그인 실패: ${err.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // 카카오 로그인 수행 (Supabase Auth OAuth 연동)
   const handleKakaoLogin = async () => {
@@ -39,17 +71,68 @@ export default function Login() {
       <div className="w-full lg:w-5/12 flex flex-col justify-center px-6 py-10 bg-[#0c0e15] z-10 shadow-[8px_0_24px_rgba(0,0,0,0.5)]">
         <div className="max-w-md w-full mx-auto">
           {/* 브랜드 헤더 */}
-          <div className="mb-12">
+          <div className="mb-8">
             <div className="flex items-center gap-3 mb-2">
               <img src="/logo.png" alt="Logo" className="w-8 h-8 object-contain" />
               <h1 className="text-xl font-bold tracking-wider text-primary">SYNTHETIC TERMINAL</h1>
             </div>
             <p className="text-sm text-slate-400">기관급 데이터 및 AI 분석 플랫폼에 오신 것을 환영합니다.</p>
           </div>  
+
+          {/* 로그인 입력 폼 */}
+          <form onSubmit={handleEmailLogin} className="flex flex-col gap-4">
+            {/* 이메일 입력란 */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider" htmlFor="email">이메일 주소</label>
+              <div className="relative">
+                <input 
+                  className="w-full bg-[#11131a] border border-slate-700 text-[#e2e2ec] rounded px-4 py-2.5 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all" 
+                  id="email" 
+                  name="email"
+                  type="email" 
+                  value={loginInputs.email}
+                  onChange={handleLoginInputChange}
+                  placeholder="user@institution.com" 
+                  required 
+                />
+              </div>
+            </div>
+            
+            {/* 비밀번호 입력란 */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider" htmlFor="password">비밀번호</label>
+              <div className="relative">
+                <input 
+                  className="w-full bg-[#11131a] border border-slate-700 text-[#e2e2ec] rounded px-4 py-2.5 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all" 
+                  id="password" 
+                  name="password"
+                  type="password" 
+                  value={loginInputs.password}
+                  onChange={handleLoginInputChange}
+                  placeholder="••••••••" 
+                  required 
+                />
+              </div>
+            </div>
+            
+            <button 
+              className="mt-4 w-full bg-primary text-white text-sm font-bold py-3 rounded hover:bg-blue-600 transition-colors cursor-pointer disabled:opacity-50" 
+              type="submit"
+              disabled={loading}
+            >
+              로그인
+            </button>
+          </form>
+
+          {/* 구분선 */}
+          <div className="flex items-center gap-4 my-6">
+            <div className="h-px bg-slate-800 flex-1"></div>
+            <span className="text-xs font-bold text-slate-500">또는</span>
+            <div className="h-px bg-slate-800 flex-1"></div>
+          </div>
           
-          {/* 소셜 로그인 버튼 (Kakao 브랜드 규격 가이드라인 적용 및 Supabase 연동, 구글 로그인 삭제) */}
+          {/* 소셜 로그인 버튼 */}
           <div className="flex flex-col gap-3">
-            {/* Kakao 로그인 버튼 */}
             <button 
               className="w-full flex items-center justify-center gap-3 bg-[#FEE500] border border-transparent text-[#191919] py-2.5 rounded hover:bg-[#FADA0A] text-sm font-semibold transition-colors cursor-pointer shadow-sm" 
               type="button"
@@ -62,7 +145,16 @@ export default function Login() {
             </button>
           </div>
           
-          {/* 돌아가기 */}          
+          {/* 회원가입 및 돌아가기 */}
+          <p className="mt-8 text-center text-xs text-slate-400">
+            아직 계정이 없으신가요?{" "}
+            <button 
+              onClick={() => navigate('/signup')} 
+              className="text-primary font-bold hover:text-ai-cyan transition-colors bg-transparent border-none cursor-pointer outline-none font-sans"
+            >
+              계정 만들기
+            </button>
+          </p>
           <div className="mt-6 text-center">
             <button 
               onClick={() => navigate('/')}

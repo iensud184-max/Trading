@@ -1,7 +1,7 @@
-from enum import StrEnum
+from enum import Enum
 
 
-class RiskLevel(StrEnum):
+class RiskLevel(str, Enum):
     """챗봇 도구가 사용자 자산에 미치는 위험 단계입니다."""
 
     READ = "READ"

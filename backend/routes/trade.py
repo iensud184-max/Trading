@@ -1794,9 +1794,9 @@ def _normalize_futures_order_options(position_side=None, reduce_only=False, leve
     }
 
 
-def _validate_futures_order_quantity(client, symbol: str, order_type: str, qty: float) -> dict:
+def _validate_futures_order_quantity(client, symbol: str, order_type: str, qty: float, price: float = 0.0) -> dict:
     """
-    바이낸스 USD-M 선물 심볼별 주문 수량 제한을 사전 검증합니다.
+    바이낸스 USD-M 선물 심볼별 주문 수량/명목금액 제한을 사전 검증합니다.
     """
     filters = client.get_futures_symbol_filters(symbol)
     is_market = str(order_type or "").upper() == "MARKET"
@@ -1813,11 +1813,22 @@ def _validate_futures_order_quantity(client, symbol: str, order_type: str, qty: 
         if abs(ratio - round(ratio)) > 1e-8:
             raise ValueError(f"{symbol} 바이낸스 선물 주문 수량은 {step_size:g} 단위로 입력해야 합니다.")
 
+    # MIN_NOTIONAL / NOTIONAL 필터: 선물은 주로 NOTIONAL 키로 제공됨
+    min_notional = filters.get("min_notional") or 0.0
+    if min_notional > 0 and price > 0:
+        notional = qty * price
+        if notional < min_notional:
+            raise ValueError(
+                f"{symbol} 바이낸스 선물 최소 주문금액은 ${min_notional:g}입니다. "
+                f"현재 예상금액 ${notional:.4f} — 수량을 늘리거나 가격을 조정하세요."
+            )
+
     return {
         "min_qty": min_qty,
         "max_qty": max_qty,
         "step_size": step_size,
         "tick_size": filters.get("tick_size"),
+        "min_notional": min_notional,
     }
 
 
@@ -1875,6 +1886,7 @@ def _normalize_crypto_order_quantity(
     symbol: str,
     order_type: str,
     qty: float,
+    price: float = 0.0,
     symbol_info_cache: dict | None = None,
 ) -> tuple[float, dict]:
     quantity_filter = _build_crypto_quantity_filter(client, exchange, symbol, order_type, symbol_info_cache)
@@ -1895,6 +1907,59 @@ def _normalize_crypto_order_quantity(
         raise ValueError("주문 수량이 거래소 주문 단위보다 작습니다. 수량을 늘려 다시 시도하세요.")
 
     normalized_float = float(normalized_qty)
+
+    # 바이낸스 현물 추가 필터 검증 (MIN_NOTIONAL, PRICE_FILTER)
+    if exchange == "BINANCE" and hasattr(client, "get_spot_symbol_info"):
+        info = _get_cached_spot_symbol_info(client, symbol, symbol_info_cache) or {}
+        ref_price = price if price and price > 0 else 0.0
+
+        # ① MIN_NOTIONAL: price × qty >= minNotional
+        min_notional = info.get("min_notional") or 0.0
+        if min_notional > 0 and ref_price > 0:
+            notional = normalized_float * ref_price
+            if notional < min_notional:
+                raise ValueError(
+                    f"{symbol} 바이낸스 현물 최소 주문금액은 ${min_notional:g}입니다. "
+                    f"현재 예상금액 ${notional:.4f} — 수량을 {math.ceil(min_notional / ref_price):g} 이상으로 늘리거나 "
+                    f"주문 단가를 조정하세요."
+                )
+
+        # ② PRICE_FILTER tickSize: (price - minPrice) % tickSize == 0
+        tick_size = info.get("tick_size") or 0.0
+        min_price = info.get("min_price") or 0.0
+        if tick_size > 0 and ref_price > 0:
+            offset = (ref_price - min_price) % tick_size
+            if offset > 1e-9 and (tick_size - offset) > 1e-9:
+                rounded = round(ref_price / tick_size) * tick_size
+                raise ValueError(
+                    f"{symbol} 바이낸스 주문 가격은 {tick_size:g} 단위여야 합니다. "
+                    f"입력가 {ref_price} → 권장가 {rounded:.10g}으로 조정하세요."
+                )
+
+        # ③ PERCENT_PRICE_BY_SIDE: 허용 가격 범위 초과 여부 (현재가 기준 근사)
+        # BUY:  price <= weightedAvgPrice × askMultiplierUp  (너무 높은 매수 차단)
+        # SELL: price >= weightedAvgPrice × bidMultiplierDown (너무 낮은 매도 차단)
+        ask_up = info.get("ask_multiplier_up") or 0.0
+        bid_down = info.get("bid_multiplier_down") or 0.0
+        if ref_price > 0:
+            try:
+                current_price = float(client.get_price(symbol).get("current_price") or 0)
+            except Exception:
+                current_price = 0.0
+            if current_price > 0:
+                if ask_up > 0 and ref_price > current_price * ask_up:
+                    raise ValueError(
+                        f"{symbol} 주문 가격 {ref_price}이 바이낸스 허용 상단 "
+                        f"(현재가 {current_price} × {ask_up} = {current_price * ask_up:.6g})을 초과합니다. "
+                        f"현재가에 가까운 가격으로 조정하세요."
+                    )
+                if bid_down > 0 and ref_price < current_price * bid_down:
+                    raise ValueError(
+                        f"{symbol} 주문 가격 {ref_price}이 바이낸스 허용 하단 "
+                        f"(현재가 {current_price} × {bid_down} = {current_price * bid_down:.6g}) 미만입니다. "
+                        f"현재가에 가까운 가격으로 조정하세요."
+                    )
+
     return normalized_float, {
         **quantity_filter,
         "original_quantity": float(original_qty),
@@ -1981,6 +2046,7 @@ def _build_precheck_payload(
             symbol=symbol,
             order_type=order_type,
             qty=qty,
+            price=price,
             symbol_info_cache=symbol_info_cache,
         )
     reference_price, price_source = _resolve_reference_price(exchange, symbol, order_type, price, client)
@@ -2009,7 +2075,9 @@ def _build_precheck_payload(
         normalized_futures_options["service_max_leverage"] = service_max_leverage
         if normalized_futures_options["leverage"] > service_max_leverage:
             raise ValueError(f"{symbol} 선물의 현재 서비스 최대 레버리지는 {service_max_leverage}x입니다. 레버리지를 {service_max_leverage}x 이하로 낮춰 다시 시도하세요.")
-        normalized_futures_options["quantity_filter"] = _validate_futures_order_quantity(client, symbol, order_type, qty)
+        normalized_futures_options["quantity_filter"] = _validate_futures_order_quantity(
+            client, symbol, order_type, qty, price=reference_price
+        )
     estimated_amount = reference_price * qty
     if not math.isfinite(estimated_amount) or estimated_amount <= 0:
         raise ValueError("예상 주문금액을 유한한 숫자로 계산할 수 없습니다.")
@@ -2275,6 +2343,9 @@ def _collect_order_entry_blockers(precheck: dict, broker_env: str) -> list[str]:
         blockers.append("바이낸스 선물 실거래가 잠겨 있습니다.")
     if broker_env == "REAL" and precheck.get("exceeds_real_order_limit"):
         blockers.append("실거래 1회 주문 한도 100,000원을 초과했습니다.")
+    # 바이낸스 MIN_NOTIONAL 필터 미달 경고
+    if precheck.get("notional_failed"):
+        blockers.append(precheck.get("notional_message") or "주문 예상금액이 바이낸스 최소 주문금액보다 작습니다.")
     return blockers
 
 

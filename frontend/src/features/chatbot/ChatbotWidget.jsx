@@ -1181,7 +1181,7 @@ export default function ChatbotWidget({
         </section>
       )}
 
-      {!isMobilePage ? (
+      {!isMobilePage && !isOpen ? (
         <button
           type="button"
           onClick={isOpen ? closeChat : openChat}

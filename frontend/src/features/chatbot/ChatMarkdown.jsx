@@ -40,12 +40,13 @@ export default function ChatMarkdown({ messageText }) {
   if (!messageText) return null
 
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      className="markdown-content whitespace-pre-wrap break-words text-xs leading-5 text-slate-100"
-      components={markdownComponents}
-    >
-      {messageText}
-    </ReactMarkdown>
+    <div className="markdown-content whitespace-pre-wrap break-words text-xs leading-5 text-slate-100">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={markdownComponents}
+      >
+        {messageText}
+      </ReactMarkdown>
+    </div>
   )
 }

@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from threading import Barrier, Lock
 
 import pytest
@@ -72,7 +72,7 @@ class FakeConversationStateBoundary:
 
 class ConcurrentConsumeBoundary:
     def __init__(self):
-        expires_at = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
         self.row = {
             "user_id": "user-1",
             "pending_action": "portfolio_summary",
@@ -137,7 +137,7 @@ class ReplacedPendingStateBoundary(FakeConversationStateBoundary):
                 "pending_action": "new_action",
                 "pending_payload": {"version": 2},
                 "pending_expires_at": (
-                    datetime.now(UTC) + timedelta(minutes=10)
+                    datetime.now(timezone.utc) + timedelta(minutes=10)
                 ).isoformat(),
             }
         return super().query(
@@ -316,7 +316,7 @@ def test_load_recent_history_enforces_user_order_and_limit_contract(monkeypatch)
 
 
 def test_expired_recommendations_are_not_reused(monkeypatch):
-    expired_at = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+    expired_at = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     monkeypatch.setattr(
         "backend.services.chatbot.conversation_repository.query_supabase",
         lambda *args, **kwargs: [{
@@ -329,7 +329,7 @@ def test_expired_recommendations_are_not_reused(monkeypatch):
     result = ChatbotConversationRepository().load_recommendations(
         "Bearer test",
         "user-1",
-        now=datetime.now(UTC),
+        now=datetime.now(timezone.utc),
     )
 
     assert result == []
@@ -397,7 +397,7 @@ def test_pending_action_is_consumed_across_repository_instances(monkeypatch):
 
 
 def test_expired_pending_action_is_not_consumed(monkeypatch):
-    expired_at = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+    expired_at = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     boundary = FakeConversationStateBoundary()
     boundary.rows["user-1"] = {
         "user_id": "user-1",
@@ -544,7 +544,7 @@ def test_consume_does_not_clear_a_replaced_pending_action(monkeypatch):
         "pending_action": "old_action",
         "pending_payload": {"version": 1},
         "pending_expires_at": (
-            datetime.now(UTC) + timedelta(minutes=5)
+            datetime.now(timezone.utc) + timedelta(minutes=5)
         ).isoformat(),
     }
     monkeypatch.setattr(

@@ -1,12 +1,18 @@
 import hmac
 import hashlib
+import math
 import time
 import requests
+from decimal import Decimal, ROUND_DOWN, InvalidOperation
 from urllib.parse import urlencode
 
-_FUTURES_EXCHANGE_INFO_CACHE = {}
-_SPOT_SYMBOL_INFO_CACHE = {}
+_FUTURES_EXCHANGE_INFO_CACHE = {}   # {cache_key: (payload, cached_at)}
+_SPOT_SYMBOL_INFO_CACHE = {}        # {cache_key: (payload, cached_at)}
 _BINANCE_TIME_SYNC_TTL_SECONDS = 300
+_BINANCE_FILTER_CACHE_TTL_SECONDS = 300  # 심볼 필터 캐시 5분 TTL
+# Binance 공식 문서: recvWindow 최대 60000ms, 보안을 위해 5000ms 권장
+_RECV_WINDOW_ORDER = 5000    # 주문·취소 등 자산 변경 API
+_RECV_WINDOW_QUERY = 10000   # 잔고·포지션 조회 API
 
 
 def _normalize_spot_symbol(symbol: str) -> str:
@@ -37,6 +43,28 @@ def _to_float(value, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _format_decimal(value: float, step: float) -> str:
+    """
+    stepSize / tickSize 기반으로 Decimal 정밀 포맷 문자열을 반환합니다.
+    Python float 부동소수점 오차를 제거해 바이낸스 -1111 에러를 방지합니다.
+    step이 0이거나 None이면 일반 g-포맷으로 대체합니다.
+    예) value=3.0, step=1.0  → '3'
+        value=1.1039, step=0.0001 → '1.1039'
+    """
+    if not step or step <= 0:
+        return f"{value:.10g}"
+    try:
+        d_value = Decimal(str(value))
+        d_step = Decimal(str(step))
+        floored = (d_value / d_step).to_integral_value(rounding=ROUND_DOWN) * d_step
+        # 소수점 불필요한 trailing zero 제거
+        normalized = floored.normalize()
+        # Decimal('3E+0') → '3' 형태 방지, 일반 표기로 변환
+        return format(normalized, 'f')
+    except (InvalidOperation, ValueError, ZeroDivisionError):
+        return f"{value:.10g}"
 
 
 class BinanceSpotClient:
@@ -89,14 +117,21 @@ class BinanceSpotClient:
         ).hexdigest()
         return signature
 
+    # 자산 변경(주문·취소) vs 조회 엔드포인트별 recvWindow 구분
+    _ORDER_PATHS = {"/api/v3/order", "/api/v3/order/test", "/api/v3/openOrders"}
+
     def _signed_request(self, method: str, path: str, params: dict | None = None):
         """
         바이낸스 SIGNED 엔드포인트용 공통 요청을 전송합니다.
+        Binance 권장: 주문 API는 recvWindow=5000, 조회는 10000 이하.
         """
+        recv_window = (
+            _RECV_WINDOW_ORDER if path in self._ORDER_PATHS else _RECV_WINDOW_QUERY
+        )
         request_params = {
             **(params or {}),
             "timestamp": self._timestamp_ms(),
-            "recvWindow": 60000,
+            "recvWindow": recv_window,
         }
         request_params["signature"] = self._sign(request_params)
         headers = {"X-MBX-APIKEY": self.api_key}
@@ -165,9 +200,11 @@ class BinanceSpotClient:
         if not normalized_symbol:
             raise ValueError("바이낸스 심볼 메타데이터 조회를 위한 심볼이 비어 있습니다.")
         cache_key = (self.base_url, normalized_symbol)
-        cached = _SPOT_SYMBOL_INFO_CACHE.get(cache_key)
-        if cached:
-            return dict(cached)
+        cached_entry = _SPOT_SYMBOL_INFO_CACHE.get(cache_key)
+        if cached_entry:
+            payload, cached_at = cached_entry
+            if time.time() - cached_at < _BINANCE_FILTER_CACHE_TTL_SECONDS:
+                return dict(payload)
 
         response = requests.get(
             f"{self.base_url}/api/v3/exchangeInfo",
@@ -195,6 +232,10 @@ class BinanceSpotClient:
         lot_size = filters.get("LOT_SIZE") or {}
         market_lot_size = filters.get("MARKET_LOT_SIZE") or {}
         price_filter = filters.get("PRICE_FILTER") or {}
+        # MIN_NOTIONAL(현물) 또는 NOTIONAL(선물): 최소 명목금액 = price × qty
+        notional_filter = filters.get("MIN_NOTIONAL") or filters.get("NOTIONAL") or {}
+        # PERCENT_PRICE_BY_SIDE: 현재가 기준 허용 가격 범위
+        pct_price_filter = filters.get("PERCENT_PRICE_BY_SIDE") or filters.get("PERCENT_PRICE") or {}
 
         result = {
             "symbol": normalized_symbol,
@@ -207,8 +248,15 @@ class BinanceSpotClient:
             "market_max_qty": _to_float(market_lot_size.get("maxQty")),
             "market_step_size": _to_float(market_lot_size.get("stepSize")),
             "tick_size": _to_float(price_filter.get("tickSize")),
+            "min_price": _to_float(price_filter.get("minPrice")),
+            "max_price": _to_float(price_filter.get("maxPrice")),
+            # 최소 명목금액(minNotional): price × qty 가 이 값 이상이어야 주문 가능
+            "min_notional": _to_float(notional_filter.get("minNotional")),
+            # PERCENT_PRICE_BY_SIDE 허용 배율 (askMultiplierUp / bidMultiplierDown)
+            "ask_multiplier_up": _to_float(pct_price_filter.get("askMultiplierUp")),
+            "bid_multiplier_down": _to_float(pct_price_filter.get("bidMultiplierDown")),
         }
-        _SPOT_SYMBOL_INFO_CACHE[cache_key] = result
+        _SPOT_SYMBOL_INFO_CACHE[cache_key] = (result, time.time())
         return dict(result)
 
     def get_balance(self) -> dict:
@@ -293,6 +341,7 @@ class BinanceSpotClient:
     def place_order(self, symbol: str, qty: float, side: str, ord_type: str, price: float = None) -> dict:
         """
         바이낸스 현물 주문을 전송합니다. MOCK/DEMO 환경도 같은 주문 API를 사용합니다.
+        수량·가격은 stepSize/tickSize 기반 Decimal 포맷으로 전송해 -1111 에러를 방지합니다.
         """
         normalized_symbol = _normalize_spot_symbol(symbol)
         side_upper = _normalize_side(side)
@@ -303,18 +352,26 @@ class BinanceSpotClient:
         if quantity <= 0:
             raise ValueError("바이낸스 주문 수량은 0보다 커야 합니다.")
 
+        # stepSize/tickSize를 캐시에서 조회해 Decimal 포맷 적용
+        try:
+            sym_info = self.get_spot_symbol_info(normalized_symbol)
+        except Exception:
+            sym_info = {}
+        step_size = sym_info.get("step_size") or 0.0
+        tick_size = sym_info.get("tick_size") or 0.0
+
         params = {
             "symbol": normalized_symbol,
             "side": side_upper,
             "type": order_type,
-            "quantity": f"{quantity:.12g}",
+            "quantity": _format_decimal(quantity, step_size),
             "newOrderRespType": "RESULT",
         }
         if order_type == "LIMIT":
             if price is None or float(price) <= 0:
                 raise ValueError("바이낸스 지정가 주문에는 0보다 큰 가격이 필요합니다.")
             params.update({
-                "price": f"{float(price):.12g}",
+                "price": _format_decimal(float(price), tick_size),
                 "timeInForce": "GTC",
             })
 
@@ -340,6 +397,7 @@ class BinanceSpotClient:
     ) -> dict:
         """
         매칭 엔진에 넣지 않는 바이낸스 현물 주문 검증 요청을 전송합니다.
+        수량·가격은 stepSize/tickSize 기반 Decimal 포맷으로 전송합니다.
         """
         normalized_symbol = _normalize_spot_symbol(symbol)
         side_upper = _normalize_side(side)
@@ -347,16 +405,24 @@ class BinanceSpotClient:
         quantity = float(qty)
         if not normalized_symbol or quantity <= 0:
             raise ValueError("바이낸스 테스트 주문에는 유효한 심볼과 수량이 필요합니다.")
+
+        try:
+            sym_info = self.get_spot_symbol_info(normalized_symbol)
+        except Exception:
+            sym_info = {}
+        step_size = sym_info.get("step_size") or 0.0
+        tick_size = sym_info.get("tick_size") or 0.0
+
         params = {
             "symbol": normalized_symbol,
             "side": side_upper,
             "type": order_type,
-            "quantity": f"{quantity:.12g}",
+            "quantity": _format_decimal(quantity, step_size),
         }
         if order_type == "LIMIT":
             if price is None or float(price) <= 0:
                 raise ValueError("바이낸스 지정가 테스트 주문에는 0보다 큰 가격이 필요합니다.")
-            params.update({"price": f"{float(price):.12g}", "timeInForce": "GTC"})
+            params.update({"price": _format_decimal(float(price), tick_size), "timeInForce": "GTC"})
         if compute_commission_rates:
             params["computeCommissionRates"] = "true"
         data = self._signed_request("POST", "/api/v3/order/test", params)
@@ -616,8 +682,11 @@ class BinanceFuturesClient:
             raise ValueError("바이낸스 선물 심볼이 비어 있습니다.")
 
         cache_key = (self.env, normalized_symbol)
-        if cache_key in _FUTURES_EXCHANGE_INFO_CACHE:
-            return _FUTURES_EXCHANGE_INFO_CACHE[cache_key]
+        cached_entry = _FUTURES_EXCHANGE_INFO_CACHE.get(cache_key)
+        if cached_entry:
+            payload, cached_at = cached_entry
+            if time.time() - cached_at < _BINANCE_FILTER_CACHE_TTL_SECONDS:
+                return payload
 
         res = requests.get(f"{self.base_url}/fapi/v1/exchangeInfo", timeout=5)
         if res.status_code != 200:
@@ -631,6 +700,10 @@ class BinanceFuturesClient:
             lot_size = filters.get("LOT_SIZE") or {}
             market_lot_size = filters.get("MARKET_LOT_SIZE") or {}
             price_filter = filters.get("PRICE_FILTER") or {}
+            # MIN_NOTIONAL(현물) 또는 NOTIONAL(선물): 최소 명목금액 = price × qty
+            notional_filter = filters.get("MIN_NOTIONAL") or filters.get("NOTIONAL") or {}
+            # PERCENT_PRICE_BY_SIDE: 현재가 기준 허용 가격 범위
+            pct_price_filter = filters.get("PERCENT_PRICE_BY_SIDE") or filters.get("PERCENT_PRICE") or {}
             payload = {
                 "symbol": normalized_symbol,
                 "min_qty": _to_float(lot_size.get("minQty")),
@@ -640,9 +713,16 @@ class BinanceFuturesClient:
                 "market_max_qty": _to_float(market_lot_size.get("maxQty")),
                 "market_step_size": _to_float(market_lot_size.get("stepSize")),
                 "tick_size": _to_float(price_filter.get("tickSize")),
+                "min_price": _to_float(price_filter.get("minPrice")),
+                "max_price": _to_float(price_filter.get("maxPrice")),
+                # 최소 명목금액(minNotional): price × qty 가 이 값 이상이어야 주문 가능
+                "min_notional": _to_float(notional_filter.get("minNotional")),
+                # PERCENT_PRICE_BY_SIDE 허용 배율
+                "ask_multiplier_up": _to_float(pct_price_filter.get("askMultiplierUp")),
+                "bid_multiplier_down": _to_float(pct_price_filter.get("bidMultiplierDown")),
                 "raw": item,
             }
-            _FUTURES_EXCHANGE_INFO_CACHE[cache_key] = payload
+            _FUTURES_EXCHANGE_INFO_CACHE[cache_key] = (payload, time.time())
             return payload
 
         raise ValueError(f"{normalized_symbol} 바이낸스 선물 거래 규칙을 찾을 수 없습니다.")
@@ -651,11 +731,21 @@ class BinanceFuturesClient:
         query_string = urlencode(query_params)
         return hmac.new(self.secret_key, query_string.encode("utf-8"), hashlib.sha256).hexdigest()
 
+    # 자산 변경(주문·취소) vs 조회 엔드포인트별 recvWindow 구분
+    _ORDER_PATHS = {"/fapi/v1/order", "/fapi/v1/order/test", "/fapi/v1/batchOrders"}
+
     def _signed_request(self, method: str, path: str, params: dict | None = None):
+        """
+        바이낸스 선물 SIGNED 엔드포인트용 공통 요청을 전송합니다.
+        Binance 권장: 주문 API는 recvWindow=5000, 조회는 10000 이하.
+        """
+        recv_window = (
+            _RECV_WINDOW_ORDER if path in self._ORDER_PATHS else _RECV_WINDOW_QUERY
+        )
         request_params = {
             **(params or {}),
             "timestamp": self._timestamp_ms(),
-            "recvWindow": 60000,
+            "recvWindow": recv_window,
         }
         request_params["signature"] = self._sign(request_params)
         headers = {"X-MBX-APIKEY": self.api_key}
@@ -804,11 +894,19 @@ class BinanceFuturesClient:
         if leverage is not None:
             settings_result["leverage"] = self.change_leverage(normalized_symbol, leverage)
 
+        # stepSize/tickSize를 캐시에서 조회해 Decimal 포맷 적용
+        try:
+            sym_filters = self.get_futures_symbol_filters(normalized_symbol)
+        except Exception:
+            sym_filters = {}
+        step_size = sym_filters.get("step_size") or 0.0
+        tick_size = sym_filters.get("tick_size") or 0.0
+
         params = {
             "symbol": normalized_symbol,
             "side": side_upper,
             "type": order_type,
-            "quantity": f"{quantity:.12g}",
+            "quantity": _format_decimal(quantity, step_size),
             "newOrderRespType": "RESULT",
         }
         if position_side:
@@ -819,7 +917,7 @@ class BinanceFuturesClient:
             if price is None or float(price) <= 0:
                 raise ValueError("바이낸스 선물 지정가 주문에는 0보다 큰 가격이 필요합니다.")
             params.update({
-                "price": f"{float(price):.12g}",
+                "price": _format_decimal(float(price), tick_size),
                 "timeInForce": "GTC",
             })
 

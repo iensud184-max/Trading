@@ -35,8 +35,11 @@ export default function AssetDetailChartPanel({
   onIntervalChange,
   onToggleExpanded,
   onCloseExpanded,
+  hoverData = null,
+  defaultLegendData = null,
 }) {
   const intervals = assetType === 'STOCK' ? STOCK_INTERVALS : CRYPTO_INTERVALS
+  const activeData = hoverData || defaultLegendData
 
   return (
     <>
@@ -66,10 +69,10 @@ export default function AssetDetailChartPanel({
             <div className="flex flex-wrap gap-1 bg-[#1b253b] p-0.5 rounded border border-[#2b395b] justify-end">
               {intervals.map((item) => (
                 <button
-                  key={item.val}
-                  type="button"
-                  onClick={() => onIntervalChange(item.val)}
-                  className={`text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2.5 py-0.5 rounded transition-all cursor-pointer ${chartInterval === item.val ? 'bg-cyan-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'}`}
+                   key={item.val}
+                   type="button"
+                   onClick={() => onIntervalChange(item.val)}
+                   className={`text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2.5 py-0.5 rounded transition-all cursor-pointer ${chartInterval === item.val ? 'bg-cyan-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'}`}
                 >
                   {item.label}
                 </button>
@@ -85,7 +88,48 @@ export default function AssetDetailChartPanel({
           </div>
         </div>
 
-        <div className={chartPanelClassName}>
+        <div className={`${chartPanelClassName} relative`}>
+          {/* Real-time OHLCV overlay legend */}
+          {!loadingChart && activeData && (
+            <div className="absolute top-2 left-3 z-20 flex flex-wrap gap-x-3 gap-y-1 rounded bg-[#0f172a]/75 p-1.5 text-[10px] font-mono text-slate-400 backdrop-blur-sm pointer-events-none border border-[#1e293b]/50">
+              <span className="text-slate-300 font-bold">
+                {hoverData ? '선택' : '최신'}
+              </span>
+              <span>
+                시 <strong className={activeData.close >= activeData.open ? 'text-red-400' : 'text-blue-400'}>
+                  {Number(activeData.open).toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                </strong>
+              </span>
+              <span>
+                고 <strong className="text-red-400">
+                  {Number(activeData.high).toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                </strong>
+              </span>
+              <span>
+                저 <strong className="text-blue-400">
+                  {Number(activeData.low).toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                </strong>
+              </span>
+              <span>
+                종 <strong className={activeData.close >= activeData.open ? 'text-red-400' : 'text-blue-400'}>
+                  {Number(activeData.close).toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                </strong>
+              </span>
+              <span>
+                량 <strong className="text-slate-200">
+                  {Number(activeData.volume).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </strong>
+              </span>
+              {(activeData.changeRate !== undefined) && (
+                <span>
+                  대비 <strong className={activeData.changeRate >= 0 ? 'text-red-400' : 'text-blue-400'}>
+                    {activeData.changeRate >= 0 ? '+' : ''}
+                    {Number(activeData.changeRate).toFixed(2)}%
+                  </strong>
+                </span>
+              )}
+            </div>
+          )}
           <div className={`absolute inset-0 flex items-center justify-center bg-[#0e1529]/95 z-10 rounded transition-opacity duration-200 ${loadingChart ? 'opacity-100' : 'opacity-0 pointer-events-none hidden'}`}>
             <span className="text-xs text-cyan-400 font-mono animate-pulse">시세 차트 로드 중...</span>
           </div>

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from backend.services.supabase_client import query_supabase
 
@@ -61,7 +61,7 @@ class ChatbotConversationRepository:
                 "pending_action": action,
                 "pending_payload": payload or {},
                 "pending_expires_at": (
-                    datetime.now(UTC) + timedelta(seconds=ttl_seconds)
+                    datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
                 ).isoformat(),
             },
         )
@@ -129,7 +129,7 @@ class ChatbotConversationRepository:
                 "recommendation_items": items,
                 "recommendation_source": source,
                 "recommendation_expires_at": (
-                    datetime.now(UTC) + timedelta(seconds=ttl_seconds)
+                    datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
                 ).isoformat(),
             },
         )
@@ -228,9 +228,9 @@ class ChatbotConversationRepository:
     def _is_unexpired(expires_at: datetime | None, now: datetime | None) -> bool:
         if expires_at is None:
             return False
-        current_time = now or datetime.now(UTC)
+        current_time = now or datetime.now(timezone.utc)
         if current_time.tzinfo is None:
-            current_time = current_time.replace(tzinfo=UTC)
+            current_time = current_time.replace(tzinfo=timezone.utc)
         return expires_at > current_time
 
     @staticmethod
@@ -241,4 +241,4 @@ class ChatbotConversationRepository:
             parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         except ValueError:
             return None
-        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)

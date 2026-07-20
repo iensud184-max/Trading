@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from backend.services.supabase_client import query_supabase_as_service_role, safe_query_supabase
@@ -200,7 +200,7 @@ class KnowledgeRepository:
                 "confidence": max(_bounded_confidence(row.get("confidence"), default=0.5), confidence),
                 "evidence_count": int(row.get("evidence_count") or 1) + 1,
                 "metadata": {**(row.get("metadata") or {}), **metadata},
-                "updated_at": datetime.now(UTC).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             }
             result = safe_query_supabase(
                 auth_header,

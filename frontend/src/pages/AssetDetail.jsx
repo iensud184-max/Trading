@@ -1,7 +1,8 @@
 import { useState, useEffect, useEffectEvent, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { createChart, CandlestickSeries } from 'lightweight-charts'
+import { createChart, CandlestickSeries, LineSeries, HistogramSeries } from 'lightweight-charts'
 import { supabase, deleteUserWatchlistItem, ensureNewsSummaries, fetchUserWatchlist, normalizeWatchlistItem, upsertUserWatchlistItem } from '../supabaseClient'
+import { calculateSMA, getVolumeColor } from './chartUtils.js'
 import Header from '../components/Header.jsx'
 import MemberOnlyModal from '../components/MemberOnlyModal.jsx'
 import { getApiErrorMessage } from '../lib/apiError.js'
@@ -323,9 +324,17 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
     }
   }
 
+  const [hoverData, setHoverData] = useState(null)
+  const [defaultLegendData, setDefaultLegendData] = useState(null)
+  const [tradingMarkers, setTradingMarkers] = useState([])
+
   const chartContainerRef = useRef(null)
   const chartRef = useRef(null)
   const candleSeriesRef = useRef(null)
+  const ma5SeriesRef = useRef(null)
+  const ma20SeriesRef = useRef(null)
+  const ma60SeriesRef = useRef(null)
+  const volumeSeriesRef = useRef(null)
   const hasAppliedInitialFitRef = useRef(false)
   const abortControllerRef = useRef(null)
   const metadataAbortControllerRef = useRef(null)
@@ -2277,17 +2286,86 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
         height: 300,
       })
 
+      // 1. Add candlestick series
       const candleSeries = chart.addSeries(CandlestickSeries, {
-        upColor: '#ef4444', // 한국 상승 빨강
-        downColor: '#3b82f6', // 한국 하락 파랑
+        upColor: '#ef4444',
+        downColor: '#3b82f6',
         borderVisible: false,
         wickUpColor: '#ef4444',
         wickDownColor: '#3b82f6',
         priceFormat: getChartPriceFormatEvent(getChartSetupSnapshot().currentPrice),
       })
 
+      // 2. Add 3 types of Moving Average line series
+      const ma5Series = chart.addSeries(LineSeries, { color: '#ffd700', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false })
+      const ma20Series = chart.addSeries(LineSeries, { color: '#a855f7', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false })
+      const ma60Series = chart.addSeries(LineSeries, { color: '#06b6d4', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false })
+
+      // 3. Add volume series (handle hybrid pane split or overlay)
+      const volumeOptions = {
+        priceFormat: { type: 'volume' },
+        priceLineVisible: false,
+        lastValueVisible: false,
+      }
+      
+      // Determine whether to split volume into pane 1 or overlay on pane 0 based on isChartExpanded
+      const volumeSeries = isChartExpanded 
+        ? chart.addSeries(HistogramSeries, volumeOptions, 1) // Pane 1
+        : chart.addSeries(HistogramSeries, {
+            ...volumeOptions,
+            priceScaleId: '', // Overlay mode
+          }) // Pane 0 (Default overlay)
+
+      if (!isChartExpanded) {
+        volumeSeries.priceScale().applyOptions({
+          scaleMargins: {
+            top: 0.8, // Overlay on the bottom 20% area
+            bottom: 0,
+          },
+        })
+      }
+
+      // Magnet mode and crosshair options
+      chart.applyOptions({
+        crosshair: {
+          mode: 0, // MagnetOHLC mode
+        }
+      })
+
       chartRef.current = chart
       candleSeriesRef.current = candleSeries
+      ma5SeriesRef.current = ma5Series
+      ma20SeriesRef.current = ma20Series
+      ma60SeriesRef.current = ma60Series
+      volumeSeriesRef.current = volumeSeries
+
+      // Subscribe to crosshair move event to update OHLCV legend
+      chart.subscribeCrosshairMove((param) => {
+        if (!param || !param.time || !param.point || param.point.x < 0 || param.point.y < 0) {
+          setHoverData(null)
+          return
+        }
+        const candle = param.seriesData.get(candleSeries)
+        const volumeData = param.seriesData.get(volumeSeries)
+        if (candle) {
+          const snapshot = getChartSetupSnapshot()
+          const currentCandles = snapshot.candleData || []
+          const index = currentCandles.findIndex(c => c.time === param.time)
+          let changeRate = 0
+          if (index > 0 && currentCandles[index - 1].close) {
+            changeRate = ((candle.close - currentCandles[index - 1].close) / currentCandles[index - 1].close) * 100
+          }
+          setHoverData({
+            time: param.time,
+            open: candle.open,
+            high: candle.high,
+            low: candle.low,
+            close: candle.close,
+            volume: volumeData ? volumeData.value : 0,
+            changeRate
+          })
+        }
+      })
 
       // 차트 생성 시점에 이미 로드된 캔들 데이터가 있다면 즉시 주입하여 비동기 완료 순서로 인한 차트 누락(검은 화면) 방지
       const chartSetupSnapshot = getChartSetupSnapshot()
@@ -2337,16 +2415,108 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
     } catch (err) {
       console.error('TradingView 차트 생성 치명적 에러:', err)
     }
-  }, [symbolLookupReady])
+  }, [symbolLookupReady, isChartExpanded])
 
-  // 4. 차트 데이터만 갱신하고 초기 1회만 fitContent 적용
+  // Load executed trading markers from Supabase trade_proposals
+  const loadTradingMarkers = useEffectEvent(async () => {
+    if (!chartRef.current || !candleSeriesRef.current || !symbol) return
+    
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!candleSeriesRef.current) return
+      if (!session?.user?.id) return
+
+      // Query executed histories from trade_proposals
+      const { data, error } = await supabase
+        .from('trade_proposals')
+        .select('side, executed_at, price')
+        .eq('exchange', exchange)
+        .eq('status', 'EXECUTED')
+        .or(buildSymbolOrFilter())
+        .order('executed_at', { ascending: true })
+
+      if (!candleSeriesRef.current) return
+      if (error) throw error
+      if (!data || data.length === 0) {
+        setTradingMarkers([])
+        return
+      }
+
+      // Map markers to chart compatible timestamps
+      const markers = data.map((item) => {
+        const dateObj = new Date(item.executed_at)
+        const timeVal = Math.floor(dateObj.getTime() / 1000)
+        
+        const isBuy = item.side === 'BUY'
+        return {
+          time: timeVal,
+          position: isBuy ? 'belowBar' : 'aboveBar',
+          color: isBuy ? '#ef4444' : '#3b82f6',
+          shape: isBuy ? 'arrowUp' : 'arrowDown',
+          text: isBuy ? 'BUY' : 'SELL',
+        }
+      })
+
+      setTradingMarkers(markers)
+    } catch (err) {
+      console.error('Failed to load trading markers:', err)
+    }
+  })
+
+  // Hook to reload trading markers on dependency changes to optimize Supabase traffic
+  useEffect(() => {
+    if (symbolLookupReady) {
+      loadTradingMarkers()
+    }
+  }, [symbol, exchange, brokerEnv, symbolLookupReady])
+
+  // 4. Update chart data and apply fitContent only on initial load
   useEffect(() => {
     if (!candleData.length || !chartRef.current || !candleSeriesRef.current) return
 
     try {
+      // 1. Set candle data
       candleSeriesRef.current.setData(candleData)
 
-      // 데이터가 성공적으로 들어왔을 때, 컨테이너 크기를 최종적으로 한번 더 정밀 싱크
+      // 2. Calculate and set Moving Average data
+      const ma5Data = calculateSMA(candleData, 5)
+      const ma20Data = calculateSMA(candleData, 20)
+      const ma60Data = calculateSMA(candleData, 60)
+      
+      if (ma5SeriesRef.current) ma5SeriesRef.current.setData(ma5Data)
+      if (ma20SeriesRef.current) ma20SeriesRef.current.setData(ma20Data)
+      if (ma60SeriesRef.current) ma60SeriesRef.current.setData(ma60Data)
+
+      // 3. Set volume data with color mapping
+      if (volumeSeriesRef.current) {
+        const volumeFormatted = candleData.map((candle, idx) => {
+          const prevCandle = idx > 0 ? candleData[idx - 1] : null
+          return {
+            time: candle.time,
+            value: candle.volume ?? 0,
+            color: getVolumeColor(candle, prevCandle),
+          }
+        })
+        volumeSeriesRef.current.setData(volumeFormatted)
+      }
+
+      // 4. Set default legend data using the latest candle
+      const lastCandle = candleData[candleData.length - 1]
+      let lastChangeRate = 0
+      if (candleData.length > 1 && candleData[candleData.length - 2].close) {
+        lastChangeRate = ((lastCandle.close - candleData[candleData.length - 2].close) / candleData[candleData.length - 2].close) * 100
+      }
+      setDefaultLegendData({
+        ...lastCandle,
+        changeRate: lastChangeRate
+      })
+
+      // 5. Draw trading markers from state
+      if (candleSeriesRef.current) {
+        candleSeriesRef.current.setMarkers(tradingMarkers)
+      }
+
+      // Synchronize container size once more after data loads successfully
       if (chartContainerRef.current) {
         const nextWidth = chartContainerRef.current.clientWidth || 800
         const nextHeight = isChartExpanded ? 720 : 300
@@ -2360,7 +2530,7 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
     } catch (err) {
       console.error('차트 데이터 갱신 실패:', err)
     }
-  }, [candleData, isChartExpanded])
+  }, [candleData, isChartExpanded, tradingMarkers])
 
   useEffect(() => {
     if (!candleSeriesRef.current) return
@@ -2698,6 +2868,8 @@ export default function AssetDetail({ isLoggedIn, userEmail, handleLogout, userP
               onIntervalChange={setChartInterval}
               onToggleExpanded={() => setIsChartExpanded((prev) => !prev)}
               onCloseExpanded={() => setIsChartExpanded(false)}
+              hoverData={hoverData}
+              defaultLegendData={defaultLegendData}
             />
 
             <AssetDetailPositionSummary

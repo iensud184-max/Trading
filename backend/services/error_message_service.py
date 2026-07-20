@@ -54,8 +54,15 @@ ERROR_GUIDES = {
         },
         "-1013": {
             "title": "바이낸스 주문 필터 조건을 통과하지 못했습니다.",
-            "message": "최소 주문금액, 가격 단위, 수량 단위, 허용 가격 범위 중 하나가 바이낸스 심볼 규칙과 맞지 않습니다.",
-            "action": "주문 수량과 가격을 현재 호가 기준으로 다시 입력하세요. 반복되면 해당 심볼의 최소 주문금액과 수량 단위를 확인해야 합니다.",
+            "message": "최소 주문금액(minNotional), 가격 단위(tickSize), 수량 단위(stepSize), 허용 가격 범위(PERCENT_PRICE) 중 하나가 바이낸스 심볼 규칙과 맞지 않습니다.",
+            "action": (
+                "권장 조치:\n"
+                "1. 최소 주문금액: XRPUSDT 등 대부분의 바이낸스 현물 심볼은 $5 이상 주문해야 합니다. "
+                "수량을 늘려주세요.\n"
+                "2. 제한가격 단위(tickSize): 주문 단가의 소수점 자릿수를 심볼 규칙에 맞게 조정하세요.\n"
+                "3. 수량 단위(stepSize): 수량이 허용 단위의 배수인지 확인하세요.\n"
+                "반복되면 해당 심볼의 exchangeInfo 필터를 확인해야 합니다."
+            ),
             "severity": "warning",
         },
         "-1015": {
@@ -516,6 +523,48 @@ KEYWORD_GUIDES = [
             "title": "격리 포지션 보유 중 레버리지 하향 불가",
             "message": "격리 마진 모드(Isolated)에서 오픈된 포지션이 있을 때는 레버리지를 낮추는 것이 거래소 정책상 금지되어 있습니다.",
             "action": "현재 오픈된 격리 포지션을 모두 정리(청산)한 후 레버리지를 낮추거나, 기존 레버리지 배수를 유지하여 주문하세요.",
+            "severity": "warning",
+        },
+    ),
+    (
+        "BINANCE_MIN_NOTIONAL",
+        [
+            "MIN_NOTIONAL",
+            "NOTIONAL",
+            "Filter failure",
+            "notional",
+            "최소 주문금액을 통과하지",
+            "예상금액이 바이낸스 최소",
+            "Order's notional",
+            "notional must be no smaller",
+            "바이낸스 현물 최소 주문금액",
+            "바이낸스 선물 최소 주문금액",
+        ],
+        {
+            "title": "바이낸스 최소 주문금액 미달입니다.",
+            "message": "주문 예상금액(price × qty)이 해당 심볼의 최소 주문 명목금액(minNotional)보다 작습니다.",
+            "action": (
+                "대부분의 바이낸스 USDT 페어 심볼은 최소 $5 이상 주문해야 합니다. "
+                "수량을 늘리거나 주문 단가를 현재가에 맞게 조정하세요. "
+                "존 계속되면 exchangeInfo 필터에서 minNotional을 직접 확인하세요."
+            ),
+            "severity": "warning",
+        },
+    ),
+    (
+        "BINANCE_TICK_SIZE",
+        [
+            "PRICE_FILTER",
+            "tickSize",
+            "tick size",
+            "가격은.*단위여야",
+            "킨 사이즈",
+            "가격 단위가 맞지",
+        ],
+        {
+            "title": "바이낸스 주문 가격 단위(tickSize)가 맞지 않습니다.",
+            "message": "입력한 가격의 소수점 정밀도가 해당 심볼의 tickSize 규칙과 맞지 않습니다.",
+            "action": "주문 가격을 tickSize 배수로 다시 임력하세요. 예) XRPUSDT 틱 사이즈 = 0.0001 USDT",
             "severity": "warning",
         },
     ),

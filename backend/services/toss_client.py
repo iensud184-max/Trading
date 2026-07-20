@@ -231,6 +231,8 @@ class TossClient(ExchangeClient):
         토큰이 만료되었거나 캐시가 없으면 새로 발급을 요청합니다.
         """
         from backend.services.token_cache_service import get_db_token_with_status, set_db_token
+        from backend.services.lock_service import distributed_lock
+        import time
 
         cached_token = self._access_token_cache.get("token")
         cached_expired_at = self._access_token_cache.get("expired_at")
@@ -267,29 +269,56 @@ class TossClient(ExchangeClient):
             }
             return token
 
-        # 토큰 새로 발급
-        token_data = self._request_new_token()
-        new_token = token_data["access_token"]
-        expires_in = int(token_data.get("expires_in", 86400))
+        # 토큰 갱신 시 분산 락 획득 시도
+        lock_key = f"toss-token:{self.env}:{self.user_id or 'anonymous'}"
+        with distributed_lock(lock_key, duration_seconds=120) as acquired:
+            if not acquired:
+                time.sleep(0.5)
+                cache_state = get_db_token_with_status("TOSS", self.env, self.user_id, self.credential_hash)
+                token = cache_state.get("token")
+                if token:
+                    expired_at_raw = cache_state.get("expired_at")
+                    try:
+                        cached_expired_at = datetime.fromisoformat(str(expired_at_raw).replace("Z", "+00:00")).replace(tzinfo=None) if expired_at_raw else None
+                    except Exception:
+                        cached_expired_at = None
+                    self._access_token_cache = {
+                        "token": token,
+                        "expired_at": cached_expired_at,
+                    }
+                    self._last_token_cache_info = {
+                        "source": "token_cache_service",
+                        "cacheStatus": "HIT",
+                        "tokenStatus": "REUSED",
+                        "errorMessage": cache_state.get("error_message"),
+                        "expiredAt": cache_state.get("expired_at"),
+                    }
+                    return token
 
-        # DB 캐시 테이블에 신규 토큰 저장 (Upsert)
-        try:
-            set_db_token("TOSS", self.env, new_token, expires_in, self.user_id, self.credential_hash)
-        except Exception:
-            pass
-        self._access_token_cache = {
-            "token": new_token,
-            "expired_at": datetime.utcnow() + timedelta(seconds=expires_in),
-        }
-        self._last_token_cache_info = {
-            "source": "token_cache_service",
-            "cacheStatus": "MISS",
-            "tokenStatus": "REFRESHED",
-            "errorMessage": cache_state.get("error_message"),
-            "expiredAt": (datetime.utcnow() + timedelta(seconds=expires_in)).isoformat() + "Z",
-        }
+            # 토큰 새로 발급
+            token_data = self._request_new_token()
+            new_token = token_data["access_token"]
+            expires_in = int(token_data.get("expires_in", 86400))
 
-        return new_token
+            # DB 캐시 테이블에 신규 토큰 저장 (Upsert)
+            try:
+                set_db_token("TOSS", self.env, new_token, expires_in, self.user_id, self.credential_hash)
+            except Exception:
+                pass
+            
+            cached_expired_at = datetime.utcnow() + timedelta(seconds=expires_in)
+            self._access_token_cache = {
+                "token": new_token,
+                "expired_at": cached_expired_at,
+            }
+            self._last_token_cache_info = {
+                "source": "token_cache_service",
+                "cacheStatus": "MISS",
+                "tokenStatus": "REFRESHED",
+                "errorMessage": None,
+                "expiredAt": cached_expired_at.isoformat() + "Z",
+            }
+            return new_token
 
 
     def _request_new_token(self) -> dict:

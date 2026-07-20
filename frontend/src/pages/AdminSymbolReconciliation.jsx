@@ -46,6 +46,7 @@ export default function AdminSymbolReconciliation() {
   const [editingStock, setEditingStock] = useState(null)
   const [stockActionLoading, setStockActionLoading] = useState(false)
   const [visibleStockCount, setVisibleStockCount] = useState(10)
+  const [stockQuery, setStockQuery] = useState('')
 
   const authHeaders = useCallback(async () => {
     const { data } = await supabase.auth.getSession()
@@ -68,6 +69,7 @@ export default function AdminSymbolReconciliation() {
       setItems(payload.data?.items || [])
       setSelected({})
       setVisibleStockCount(10)
+      setStockQuery('')
     } catch (requestError) {
       setError(requestError.message || '종목 정리 결과를 불러오지 못했습니다.')
     } finally {
@@ -81,9 +83,20 @@ export default function AdminSymbolReconciliation() {
   }, [loadLatest])
 
   const filteredItems = useMemo(() => {
-    if (statusFilter === 'ALL') return items
-    return items.filter((item) => item.status === statusFilter)
-  }, [items, statusFilter])
+    let result = items
+    if (statusFilter !== 'ALL') {
+      result = result.filter((item) => item.status === statusFilter)
+    }
+    const query = stockQuery.trim().toLowerCase()
+    if (query) {
+      result = result.filter(
+        (item) =>
+          (item.symbol || '').toLowerCase().includes(query) ||
+          (item.name || '').toLowerCase().includes(query),
+      )
+    }
+    return result
+  }, [items, statusFilter, stockQuery])
 
   const selectedRows = useMemo(
     () => items.filter((item) => selected[`${item.source_table}:${item.symbol}`]),
@@ -248,12 +261,21 @@ export default function AdminSymbolReconciliation() {
 
           <div className="rounded border border-slate-800 bg-[#0f172a] p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(STATUS_LABELS).map(([status, label]) => (
-                  <button key={status} type="button" onClick={() => { setStatusFilter(status); setVisibleStockCount(10); }} className={`rounded px-3 py-1.5 text-xs font-bold transition ${statusFilter === status ? 'bg-ai-cyan text-[#07111f]' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>
-                    {label}
-                  </button>
-                ))}
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(STATUS_LABELS).map(([status, label]) => (
+                    <button key={status} type="button" onClick={() => { setStatusFilter(status); setVisibleStockCount(10); }} className={`rounded px-3 py-1.5 text-xs font-bold transition ${statusFilter === status ? 'bg-ai-cyan text-[#07111f]' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="search"
+                  value={stockQuery}
+                  onChange={(e) => { setStockQuery(e.target.value); setVisibleStockCount(10); }}
+                  placeholder="종목명 또는 심볼 검색"
+                  className="rounded border border-slate-700 bg-[#0b1020] px-3 py-1.5 text-xs text-white outline-none focus:border-ai-cyan w-48 lg:w-56"
+                />
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => runAction('deactivate')} className="rounded border border-orange-500/40 px-3 py-1.5 text-xs font-bold text-orange-200 hover:bg-orange-500/10 active:scale-95 transition">

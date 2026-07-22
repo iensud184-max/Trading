@@ -60,16 +60,21 @@ class AdminAiManagedTrader:
             if quantity <= 0:
                 raise AdminAiRiskViolation("Calculated trade quantity is invalid.")
 
+            # 슬리피지 허용을 위해 현재가 +0.5% 지정가 주문 (LIMIT 주문만 지원)
+            side_upper = signal_type.upper()
+            limit_price = round(current_price * 1.005, 6) if side_upper == "BUY" else round(current_price * 0.995, 6)
+
             logger.info(
-                f"[AdminAiTrader] EXECUTING {signal_type} for {symbol} | Qty: {quantity:.6f} @ {current_price}"
+                f"[AdminAiTrader] EXECUTING {signal_type} for {symbol} | "
+                f"Qty: {quantity:.6f} @ limit {limit_price} (spot: {current_price})"
             )
 
             order_result = exchange_client.place_order(
                 symbol=symbol,
-                side=signal_type.lower(),
-                order_type="market",
-                quantity=quantity,
-                price=current_price
+                side=side_upper,
+                ord_type="LIMIT",
+                qty=quantity,
+                price=limit_price,
             )
 
             self._log_trade_execution(

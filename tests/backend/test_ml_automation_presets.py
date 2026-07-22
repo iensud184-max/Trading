@@ -4,7 +4,7 @@ from backend.services.ml_automation_service import resolve_automation_preset
 def test_kr_stock_automation_preset_uses_kr_universe_and_dart_prebuild():
     preset = resolve_automation_preset("kr-stock-v1-full")
 
-    assert preset["dataset"]["preset"] == "stock_kr_core_45"
+    assert preset["dataset"]["preset"] == "kr_stock"
     assert preset["dataset"]["raw_output"] == "kr_stock_candles.csv"
     assert preset["training"]["config"] == "ml/configs/lgbm_kr_stock_v1.yaml"
     assert preset["training"]["risk_config"] == "ml/configs/lgbm_kr_stock_risk_v1.yaml"
@@ -24,7 +24,7 @@ def test_kr_stock_automation_preset_uses_kr_universe_and_dart_prebuild():
 def test_us_stock_automation_preset_uses_us_universe_without_dart_prebuild():
     preset = resolve_automation_preset("us-stock-v1-full")
 
-    assert preset["dataset"]["preset"] == "stock_us_core_45"
+    assert preset["dataset"]["preset"] == "us_stock"
     assert preset["dataset"]["raw_output"] == "us_stock_candles.csv"
     assert preset["training"]["config"] == "ml/configs/lgbm_us_stock_v1.yaml"
     assert preset["training"]["risk_config"] == "ml/configs/lgbm_us_stock_risk_v1.yaml"

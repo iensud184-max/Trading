@@ -178,12 +178,10 @@ class TossClient(ExchangeClient):
                         pass
 
                 if is_unauthorized:
-                    logger.warning(
-                        "[Toss Client] 401 Unauthorized 감지. 토큰 1회 재발급 후 재시도합니다. (시도 %s/%s)",
-                        attempt + 1,
-                        max_attempts,
-                    )
                     if not refreshed_once:
+                        logger.info(
+                            "[Toss Client] 401 Unauthorized 감지. DB 토큰 캐시 만료 처리 및 1회 갱신을 진행합니다.",
+                        )
                         refreshed_once = True
                         self._clear_token_cache()
                         continue

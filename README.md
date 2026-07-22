@@ -152,14 +152,14 @@ graph TD
 
 본 리포지토리는 프론트엔드(`frontend`), 백엔드 API 게이트웨이 및 워커(`backend`), 그리고 머신러닝 학습 모델 파이프라인(`ml`) 디렉토리로 구성됩니다. 
 
-상세한 파일 및 디렉토리 명세는 [**프로젝트 디렉토리 구조 명세서(project_structure.md)**](/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/docs/project_structure.md) 문서를 통해 확인할 수 있습니다.
+상세한 파일 및 디렉토리 명세는 [**프로젝트 디렉토리 구조 명세서(project_structure.md)**](docs/project_structure.md) 문서를 통해 확인할 수 있습니다.
 
 ### 핵심 진입 파일
 
-- [**app.py**](/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/backend/app.py): 백엔드 API Gateway 진입 파일.
-- [**worker.py**](/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/backend/worker.py): 백그라운드 스케줄러/감시 엔진의 단일 진입 파일.
-- [**frontend/src/main.jsx**](/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/frontend/src/main.jsx): 프론트엔드 React 19 SPA 진입점.
-- [**ml/src/run_pipeline_bundle.py**](/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/ml/src/run_pipeline_bundle.py): 머신러닝 학습 파이프라인 기동 스크립트.
+- [**app.py**](backend/app.py): 백엔드 API Gateway 진입 파일.
+- [**worker.py**](backend/worker.py): 백그라운드 스케줄러/감시 엔진의 단일 진입 파일.
+- [**frontend/src/main.jsx**](frontend/src/main.jsx): 프론트엔드 React 19 SPA 진입점.
+- [**ml/src/run_pipeline_bundle.py**](ml/src/run_pipeline_bundle.py): 머신러닝 학습 파이프라인 기동 스크립트.
 
 ---
 
@@ -204,8 +204,9 @@ graph TD
 
 프로젝트의 심층적인 구조와 변경 이력은 다음의 관련 문서를 통해 탐색할 수 있습니다.
 
-- [**Changelog (CHANGELOG.md)**](/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/CHANGELOG.md): 컴포넌트별 린트 정리 및 정밀 리팩토링 상세 이력
-- [**시스템 흐름 문서 (system_workflow.md)**](/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/docs/system_workflow.md): API 게이트웨이, 워커 프로세스, 뉴스/ML RAG 등 내부 시퀀스 명세
-- [**데이터베이스 사양서 (database_specification.md)**](/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/docs/database_specification.md): 19개 핵심 테이블 정의 및 RLS 정책 가이드라인
-- [**프로젝트 디렉토리 구조 (project_structure.md)**](/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/docs/project_structure.md): 디렉토리별 정적 구조 세부 명세
+- [**Changelog (CHANGELOG.md)**](docs/CHANGELOG.md): 컴포넌트별 린트 정리 및 정밀 리팩토링 상세 이력
+- [**시스템 흐름 문서 (system_workflow.md)**](docs/system_workflow.md): API 게이트웨이, 워커 프로세스, 뉴스/ML RAG 등 내부 시퀀스 명세
+- [**데이터베이스 사양서 (database_specification.md)**](docs/database_specification.md): 39개 전체 테이블 정의, 도메인별 4대 ERD 및 RLS 정책 가이드라인
+- [**프로젝트 디렉토리 구조 (project_structure.md)**](docs/project_structure.md): 디렉토리별 정적 구조 세부 명세
+- [**AWS EC2 배포 가이드 (AWS_DEPLOYMENT_GUIDE.md)**](docs/AWS_DEPLOYMENT_GUIDE.md): AWS EC2 + Docker 기반 백엔드/워커 배포 및 운영 가이드라인
 

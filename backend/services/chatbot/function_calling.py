@@ -368,7 +368,7 @@ FUNCTION_SCHEMAS = [
                 },
                 "investment_amount": {
                     "type": "number",
-                    "description": "감시에 할당할 총 원화 투자 금액. 예: 100000 (10만원). 기본값은 100,000원입니다."
+                    "description": "감시에 할당할 총 원화 투자 금액 (예: 100000)."
                 },
                 "quantity": {
                     "type": "number",

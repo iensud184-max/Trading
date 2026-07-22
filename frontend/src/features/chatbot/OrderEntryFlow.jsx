@@ -520,8 +520,8 @@ export default function OrderEntryFlow({ onClose, onProposalCreated, initialPref
                 <p className="font-bold text-slate-200">위험 확인</p>
                 <p className="mt-1 text-[10px] text-slate-400">
                   {futures
-                    ? `${draft.precheck.futures_options?.leverage || draft.leverage}x · ${draft.precheck.futures_options?.margin_type || draft.margin_type} · 명목금액 기준 실거래 하드캡 적용`
-                    : '현재가·보유량·거래 시간·실거래 하드캡을 서버에서 확인했습니다.'}
+                    ? `${draft.precheck.futures_options?.leverage || draft.leverage}x · ${draft.precheck.futures_options?.margin_type || draft.margin_type}`
+                    : '현재가·보유량·거래 시간을 서버에서 확인했습니다.'}
                 </p>
               </div>
               <p className="text-[10px] text-slate-400">최신 시세 확인 {draft.precheck.checked_at || '-'}</p>

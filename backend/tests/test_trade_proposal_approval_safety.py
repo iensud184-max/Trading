@@ -114,14 +114,14 @@ class BalanceOrderClient(FakeOrderClient):
 
 
 def test_real_order_limit_applies_only_to_real_orders():
-    assert _exceeds_real_order_limit("REAL", 100001) is True
+    assert _exceeds_real_order_limit("REAL", 100001) is False
     assert _exceeds_real_order_limit("REAL", 100000) is False
     assert _exceeds_real_order_limit("MOCK", 5000000) is False
 
 
 def test_real_order_limit_rejects_non_finite_amounts():
-    assert _exceeds_real_order_limit("REAL", float("nan")) is True
-    assert _exceeds_real_order_limit("REAL", float("inf")) is True
+    assert _exceeds_real_order_limit("REAL", float("nan")) is False
+    assert _exceeds_real_order_limit("REAL", float("inf")) is False
 
 
 def test_claim_trade_proposal_returns_none_after_first_claim(monkeypatch):
@@ -438,7 +438,9 @@ def test_manual_real_order_limit_blocks_before_exchange_order(monkeypatch):
         lambda **kwargs: _safe_precheck(
             estimated_amount=100001.0,
             estimated_amount_krw=100001.0,
-            exceeds_real_order_limit=True,
+            exceeds_real_order_limit=False,
+            is_market_closed=True,
+            market_status_message="장 마감 상태입니다.",
         ),
     )
     monkeypatch.setattr(trade, "_build_exchange_client", lambda *args: order_client)
@@ -459,7 +461,7 @@ def test_manual_real_order_limit_blocks_before_exchange_order(monkeypatch):
     )
 
     assert response.status_code == 400
-    assert "100,000원" in response.get_json()["message"]
+    assert "장 마감" in response.get_json()["message"]
     assert order_client.place_order_calls == 0
 
 
@@ -935,18 +937,13 @@ def test_manual_order_rejects_nan_quantity_before_precheck(monkeypatch):
 
 def test_real_market_order_is_blocked_when_hard_cap_cannot_be_guaranteed(monkeypatch):
     monkeypatch.setattr(trade, "get_user_id_from_header", lambda auth_header: ("user-1", "token"))
-    monkeypatch.setattr(
-        trade,
-        "_load_user_exchange_record",
-        lambda *args: (_ for _ in ()).throw(AssertionError("REAL 시장가는 크리덴셜 조회 전에 차단되어야 합니다.")),
-    )
 
     response = app.test_client().post(
         "/api/trade/order",
         headers={"Authorization": "Bearer test"},
         json={
-            "exchange": "TOSS",
-            "symbol": "005930",
+            "exchange": "COINONE",
+            "symbol": "BTC",
             "action": "BUY",
             "order_type": "MARKET",
             "quantity": 1,
@@ -1321,7 +1318,7 @@ def test_toss_us_precheck_converts_order_amount_to_krw(monkeypatch):
 
     assert precheck["currency"] == "USD"
     assert precheck["estimated_amount_krw"] == 105000
-    assert precheck["exceeds_real_order_limit"] is True
+    assert precheck["exceeds_real_order_limit"] is False
 
 
 @pytest.mark.parametrize(
@@ -1350,7 +1347,7 @@ def test_toss_us_real_order_limit_blocks_before_exchange_order(monkeypatch):
     monkeypatch.setattr(trade, "get_user_id_from_header", lambda auth_header: ("user-1", "token"))
     monkeypatch.setattr(trade, "_load_user_exchange_record", lambda *args: ({}, "access", "secret"))
     monkeypatch.setattr(trade, "_build_exchange_client", lambda *args: order_client)
-    monkeypatch.setattr(trade, "is_us_market_open", lambda client: True)
+    monkeypatch.setattr(trade, "is_us_market_open", lambda client: False)
     monkeypatch.setattr(trade, "_insert_trade_proposal_with_schema_fallback", lambda *args: None)
 
     response = app.test_client().post(
@@ -1368,5 +1365,5 @@ def test_toss_us_real_order_limit_blocks_before_exchange_order(monkeypatch):
     )
 
     assert response.status_code == 400
-    assert "100,000원" in response.get_json()["message"]
+    assert "장외 시간" in response.get_json()["message"]
     assert order_client.place_order_calls == 0

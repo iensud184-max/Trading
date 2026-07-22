@@ -39,7 +39,7 @@ PRICE_CHANGE_CACHE = {}
 PRICE_CHANGE_CACHE_TTL = 10
 CACHE_TTL_SECONDS = 10  # 기본값 10초 유효
 LEVEL2_CACHE_TTL_SECONDS = 10
-REAL_ORDER_LIMIT_KRW = 100000.0
+REAL_ORDER_LIMIT_KRW = None
 USD_KRW_FALLBACK = 1500.0
 SUPPORTED_TRADE_EXCHANGES = {"TOSS", "KIS", "COINONE", "BINANCE", "BINANCE_UM_FUTURES"}
 CRYPTO_EXCHANGES = {"COINONE", "BINANCE", "BINANCE_UM_FUTURES"}
@@ -2025,14 +2025,8 @@ def _run_binance_order_test(
 
 
 def _exceeds_real_order_limit(broker_env: str, estimated_amount_krw: float) -> bool:
-    """REAL 주문에만 1회 주문 한도를 적용합니다."""
-    if str(broker_env or "").upper() != "REAL":
-        return False
-    try:
-        amount = float(estimated_amount_krw)
-    except (TypeError, ValueError):
-        return True
-    return not math.isfinite(amount) or amount > REAL_ORDER_LIMIT_KRW
+    """REAL 주문 한도 하드캡이 제거되어 1회 주문 한도 초과를 적용하지 않습니다."""
+    return False
 
 
 def _build_precheck_payload(
@@ -2210,8 +2204,6 @@ def _build_precheck_payload(
     warnings = []
     if is_market_closed:
         warnings.append(market_status_message)
-    if exceeds_hard_cap:
-        warnings.append("실거래 1회 주문 한도 100,000원을 초과했습니다.")
 
     insufficient_permission = False
     permission_message = ""
@@ -2270,7 +2262,7 @@ def _build_precheck_payload(
         "exchange_rate": exchange_rate,
         "required_margin": required_margin,
         "futures_options": normalized_futures_options,
-        "real_order_limit_krw": REAL_ORDER_LIMIT_KRW,
+        "real_order_limit_krw": None,
         "exceeds_real_order_limit": exceeds_hard_cap,
         "futures_real_blocked": futures_real_blocked,
         "insufficient_permission": insufficient_permission,
@@ -2365,8 +2357,6 @@ def _collect_order_entry_blockers(precheck: dict, broker_env: str) -> list[str]:
         blockers.append(precheck.get("permission_message") or "거래 권한이 없습니다.")
     if precheck.get("futures_real_blocked"):
         blockers.append("바이낸스 선물 실거래가 잠겨 있습니다.")
-    if broker_env == "REAL" and precheck.get("exceeds_real_order_limit"):
-        blockers.append("실거래 1회 주문 한도 100,000원을 초과했습니다.")
     # 바이낸스 MIN_NOTIONAL 필터 미달 경고
     if precheck.get("notional_failed"):
         blockers.append(precheck.get("notional_message") or "주문 예상금액이 바이낸스 최소 주문금액보다 작습니다.")
@@ -2703,11 +2693,6 @@ def precheck_manual_order():
 
     if exchange == "COINONE" and order_type != "LIMIT":
         return jsonify({"success": False, "message": "코인원 주문 사전검증은 현재 지정가(LIMIT)만 지원합니다."}), 400
-    if broker_env == "REAL" and order_type == "MARKET":
-        return jsonify({
-            "success": False,
-            "message": "실거래 시장가 주문은 100,000원 하드캡을 보장할 수 없어 지원하지 않습니다. 지정가를 입력해 주세요.",
-        }), 400
     try:
         _validate_crypto_asset_policy(exchange, symbol)
     except ValueError as error:
@@ -2762,8 +2747,7 @@ def precheck_manual_order():
 def place_manual_order():
     """
     통합 수동 주문 API 엔드포인트.
-    프론트엔드에서 수동으로 입력한 주문을 처리하고,
-    주문 금액이 10만원 이하인지 가드 검증을 거친 후 해당하는 거래소 API를 기동합니다.
+    프론트엔드에서 수동으로 입력한 주문을 사전 검증을 거친 후 해당하는 거래소 API를 기동합니다.
     """
     auth_header = request.headers.get("Authorization")
     if not auth_header:
@@ -2806,11 +2790,6 @@ def place_manual_order():
         return jsonify({"success": False, "message": "올바르지 않은 주문 유형(order_type)입니다."}), 400
     if exchange == "COINONE" and order_type.upper() != "LIMIT":
         return jsonify({"success": False, "message": "코인원 주문은 현재 지정가(LIMIT)만 지원합니다."}), 400
-    if broker_env == "REAL" and order_type.upper() == "MARKET":
-        return jsonify({
-            "success": False,
-            "message": "실거래 시장가 주문은 100,000원 하드캡을 보장할 수 없어 지원하지 않습니다. 지정가를 입력해 주세요.",
-        }), 400
     try:
         _validate_crypto_asset_policy(exchange, str(symbol))
     except ValueError as error:
@@ -2908,12 +2887,6 @@ def place_manual_order():
         if not math.isfinite(normalized_precheck_qty) or normalized_precheck_qty <= 0:
             return jsonify({"success": False, "message": "사전검증 수량은 0보다 큰 유한한 숫자여야 합니다."}), 400
         qty = normalized_precheck_qty
-
-    if precheck.get("exceeds_real_order_limit"):
-        return jsonify({
-            "success": False,
-            "message": "실거래 1회 주문 한도 100,000원을 초과했습니다. 수량 또는 가격을 낮춰 주세요.",
-        }), 400
 
     if precheck.get("is_market_closed"):
         return jsonify({"success": False, "message": precheck.get("market_status_message") or "현재는 거래가 불가능한 시간(또는 휴장일)입니다."}), 400

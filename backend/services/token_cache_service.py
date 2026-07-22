@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from backend.services.supabase_client import (
     query_supabase_as_service_role,
@@ -18,7 +18,7 @@ def get_db_token_with_status(
     credential_hash: str | None = None,
 ) -> dict:
     """
-    Returns a DB token together with cache metadata.
+    Returns a DB token together with cache metadata using UTC timezone.
     """
     result = {
         "token": None,
@@ -58,13 +58,12 @@ def get_db_token_with_status(
 
         expired_at_str_clean = expired_at_str.replace("Z", "+00:00")
         expired_at = datetime.fromisoformat(expired_at_str_clean)
-        if expired_at.tzinfo is not None:
-            now = datetime.now(expired_at.tzinfo)
-        else:
-            now = datetime.now()
+        if expired_at.tzinfo is None:
+            expired_at = expired_at.replace(tzinfo=timezone.utc)
+        
+        now = datetime.now(timezone.utc)
 
         # 만료 5분 이내 토큰은 재사용하지 않고 새로 발급하도록 둔다.
-        # 실제 만료 직전까지 쓰면 요청 실패가 잦아져서, 완충 구간을 남겨 둔 것이다.
         if (expired_at - now).total_seconds() <= 300:
             return result
 
@@ -87,8 +86,6 @@ def get_db_token(
     """
     Returns a valid token from Supabase token_caches.
     """
-    # 기존 호출부는 토큰 값만 필요하므로 기존 반환형을 유지한다.
-    # 새 메타데이터가 필요하면 get_db_token_with_status를 직접 쓰면 된다.
     return get_db_token_with_status(exchange, env, user_id, credential_hash).get("token")
 
 
@@ -107,15 +104,16 @@ def set_db_token(
     env_upper = env.upper()
 
     encrypted_token = crypto.encrypt(token)
-    expired_at = datetime.utcnow() + timedelta(seconds=expires_in)
-    expired_at_str = expired_at.isoformat() + "Z"
+    now_utc = datetime.now(timezone.utc)
+    expired_at = now_utc + timedelta(seconds=max(expires_in, 60))
+    expired_at_str = expired_at.isoformat()
 
     payload = {
         "exchange": exchange_upper,
         "broker_env": env_upper,
         "encrypted_access_token": encrypted_token,
         "expired_at": expired_at_str,
-        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "updated_at": now_utc.isoformat(),
     }
     if user_id:
         payload["user_id"] = user_id

@@ -169,15 +169,18 @@ class KISClient(ExchangeClient):
         token_data = self._request_new_token()
         new_token = token_data["access_token"]
         
-        # 만료 시각 계산
+        # 만료 시각 계산 (KIS API의 access_token_token_expired는 KST 기준)
         expires_in = 86400
         expired_at_raw = token_data.get("access_token_token_expired")
         if expired_at_raw:
             try:
-                exp_dt = datetime.strptime(expired_at_raw, "%Y-%m-%d %H:%M:%S")
-                expires_in = int((exp_dt - datetime.now()).total_seconds())
+                kst = timezone(timedelta(hours=9))
+                exp_dt = datetime.strptime(expired_at_raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=kst)
+                now_kst = datetime.now(kst)
+                expires_in = int((exp_dt - now_kst).total_seconds())
             except Exception:
                 pass
+        expires_in = max(expires_in, 300)
 
         # DB 캐시 테이블에 신규 토큰 저장 (Upsert)
         try:

@@ -1762,8 +1762,6 @@ def _collect_precheck_blockers(precheck: dict, broker_env: str) -> list[str]:
         blockers.append(precheck.get("permission_message") or "거래 권한이 없습니다.")
     if precheck.get("futures_real_blocked"):
         blockers.append("바이낸스 선물 실거래가 잠겨 있습니다.")
-    if broker_env == "REAL" and precheck.get("exceeds_real_order_limit"):
-        blockers.append("실거래 1회 주문 한도 100,000원을 초과했습니다.")
     return blockers
 
 
@@ -2174,13 +2172,6 @@ def create_trade_proposal_from_message(auth_header: str, message: str, intent: P
         error_text = str(error)
         if "API 키" in error_text or "API키" in error_text:
             action = "거래소 API 키가 없거나 권한이 부족할 수 있습니다. API 키 등록과 계좌 환경을 확인한 뒤 다시 시도해 주세요."
-        elif "실거래 시장가" in error_text or "하드캡" in error_text:
-            action = (
-                "실거래 시장가 제안은 만들 수 없습니다. "
-                "10만원 하드캡을 보장하려면 지정가를 함께 입력해 주세요. "
-                "예: 'RDDT 195달러에 1주 실거래 매수 제안'. "
-                "단, 예상 원화 주문금액이 10만원을 넘으면 실거래 제안은 차단됩니다."
-            )
         elif "현재가" in error_text or "주문금액" in error_text:
             action = "현재가와 예상 주문금액을 확인하지 못했습니다. 시세 연결 상태를 확인한 뒤 다시 시도해 주세요."
         else:

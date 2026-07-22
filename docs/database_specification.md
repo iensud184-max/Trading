@@ -4,31 +4,250 @@
 
 ---
 
-## 1. 데이터베이스 ER 다이어그램 (스키마 관계)
+## 1. 데이터베이스 ER 다이어그램 (도메인별 4대 분할)
 
+마크다운 뷰어(VS Code, Obsidian, GitHub 등)에서 아래 도메인별 다이어그램을 영역별로 한눈에 보거나 개별 캡처하여 활용할 수 있습니다.
+
+### 1.1 사용자, 계좌 및 커뮤니티 도메인 (User, Account & Community)
 ```mermaid
 erDiagram
+    profiles {
+        uuid id PK
+        string email
+        string nickname
+        string phone
+        string role
+    }
+    public_profiles {
+        uuid id PK
+        string nickname
+        string role
+    }
+    user_api_keys {
+        uuid id PK
+        uuid user_id FK
+        string exchange
+        string broker_env
+        jsonb api_permissions
+    }
+    token_caches {
+        uuid id PK
+        uuid user_id FK
+        string exchange
+        string access_token
+    }
+    user_watchlist {
+        uuid id PK
+        uuid user_id FK
+        string symbol
+        string asset_type
+    }
+    inquiries {
+        uuid id PK
+        uuid user_id FK
+        string inquiry_type
+        string title
+        string status
+    }
+    community_posts {
+        uuid id PK
+        uuid user_id FK
+        uuid parent_id FK
+        string symbol
+        string content
+    }
+    profiles ||--|| public_profiles : "publishes"
     profiles ||--o{ user_api_keys : "owns"
+    profiles ||--o{ user_watchlist : "favorites"
+    profiles ||--o{ inquiries : "submits"
+    profiles ||--o{ community_posts : "writes"
+    user_api_keys ||--o{ token_caches : "caches_oauth"
+    community_posts ||--o{ community_posts : "replies_to"
+```
+
+### 1.2 매매, 제안 및 주문원장 도메인 (Trading & Order Execution)
+```mermaid
+erDiagram
+    auto_trading_rules {
+        uuid id PK
+        uuid user_id FK
+        string symbol
+        numeric target_profit_rate
+        numeric stop_loss_rate
+        uuid entry_order_proposal_id FK
+        boolean auto_restart
+    }
+    trade_proposals {
+        uuid id PK
+        uuid user_id FK
+        string exchange
+        string symbol
+        string side
+        numeric price
+        numeric volume
+        string status
+    }
+    broker_order_history {
+        uuid id PK
+        uuid user_id FK
+        string exchange
+        string external_order_id
+        string symbol
+        string side
+        string status
+    }
+    asset_transfer_proposals {
+        uuid id PK
+        uuid user_id FK
+        string from_exchange
+        string to_exchange
+        string currency
+        numeric amount
+        string fee_currency
+    }
+    portfolio_snapshots {
+        uuid id PK
+        uuid user_id FK
+        numeric total_asset_krw
+        timestamptz as_of
+    }
+    profiles ||--o{ auto_trading_rules : "defines"
     profiles ||--o{ trade_proposals : "creates"
     profiles ||--o{ broker_order_history : "syncs"
-    profiles ||--o{ auto_trading_rules : "defines"
-    profiles ||--o{ user_watchlist : "favorites"
-    profiles ||--o{ chat_history : "dialogues"
-    profiles ||--o{ paper_portfolios : "paper_trading"
-    profiles ||--|| public_profiles : "publishes"
-    profiles ||--o{ community_posts : "writes"
+    profiles ||--o{ asset_transfer_proposals : "requests"
+    profiles ||--o{ portfolio_snapshots : "snapshots"
+    auto_trading_rules ||--o| trade_proposals : "triggers_proposal"
+```
 
+### 1.3 뉴스, DART 공시 & RAG 지식 도메인 (News, Disclosure & RAG Knowledge)
+```mermaid
+erDiagram
+    news_articles {
+        uuid id PK
+        string title
+        string summary
+        string symbol
+        string quality_status
+    }
+    news_fetch_logs {
+        uuid id PK
+        string source
+        string status
+        integer fetched_count
+    }
+    dart_disclosures {
+        text rcept_no PK
+        string corp_code
+        string stock_code
+        string report_nm
+        date rcept_dt
+    }
+    dart_disclosure_analyses {
+        uuid id PK
+        text rcept_no FK
+        string category
+        string sentiment
+        string headline
+    }
+    user_knowledge_notes {
+        uuid id PK
+        uuid user_id FK
+        string vault_name
+        string title
+    }
+    user_memory_facts {
+        uuid id PK
+        uuid user_id FK
+        string memory_type
+        string content
+    }
+    knowledge_chunks {
+        uuid id PK
+        string source_type
+        string source_id
+        string embedding_status
+    }
+    news_articles ||--o{ news_fetch_logs : "fetched_by"
+    dart_disclosures ||--o| dart_disclosure_analyses : "analyzed_by"
+    dart_disclosures ||--o{ dart_fetch_logs : "fetched_by"
+    profiles ||--o{ user_knowledge_notes : "creates"
+    profiles ||--o{ user_memory_facts : "records"
+    user_knowledge_notes ||--o{ knowledge_chunks : "chunked_to"
+    dart_disclosure_analyses ||--o{ knowledge_chunks : "chunked_to"
+```
+
+### 1.4 종목 마스터, ML & 시스템 분석 도메인 (Market Master, ML & Analytics)
+```mermaid
+erDiagram
+    kis_stock_master {
+        uuid id PK
+        string symbol UK
+        string name
+        string display_name
+        string market_country
+    }
+    kis_stock_turnover_latest {
+        uuid id PK
+        string symbol UK
+        numeric current_price
+        numeric change_rate
+    }
+    crypto_assets {
+        uuid id PK
+        string base_symbol UK
+        string display_name_ko
+        string default_exchange
+        boolean admin_trading_blocked
+    }
+    symbol_aliases {
+        uuid id PK
+        string alias_symbol UK
+        string canonical_symbol
+        string alias_type
+    }
+    admin_symbol_reconciliation_runs {
+        uuid id PK
+        string status
+        integer checked_count
+    }
+    admin_symbol_reconciliation_items {
+        uuid id PK
+        uuid run_id FK
+        string symbol
+        string status
+        string suggested_action
+    }
+    ml_model_registry {
+        uuid id PK
+        string model_name
+        string version
+    }
+    chatbot_token_usage_logs {
+        uuid id PK
+        uuid user_id FK
+        string model
+        integer total_tokens
+    }
+    chatbot_qa_events {
+        uuid id PK
+        uuid user_id FK
+        string event_type
+    }
+    kis_stock_master ||--o{ kis_stock_turnover_latest : "tracks_turnover"
+    kis_stock_master ||--o{ symbol_aliases : "maps_aliases"
+    kis_stock_master ||--o{ admin_symbol_reconciliation_items : "reconciles"
+    admin_symbol_reconciliation_runs ||--o{ admin_symbol_reconciliation_items : "contains"
     profiles ||--o{ ml_dataset_jobs : "executes"
     profiles ||--o{ ml_training_runs : "runs"
     profiles ||--o{ ml_model_registry : "approves"
-
     ml_dataset_jobs ||--o{ ml_training_runs : "feeds"
-    user_api_keys ||--o{ token_caches : "caches_oauth"
+    profiles ||--o{ chatbot_token_usage_logs : "uses_tokens"
+    profiles ||--o{ chatbot_qa_events : "logs_qa"
 ```
 
 ---
 
-## 2. 테이블별 상세 정의 (19개 핵심 테이블)
+## 2. 테이블별 상세 정의 (38개 전체 테이블)
 
 ### 2.1 profiles
 *   **용도**: 서비스 가입 사용자의 기본 정보와 인증 권한의 매핑 테이블 (Supabase Auth와 auth.uid() 연동)
@@ -67,6 +286,7 @@ erDiagram
     *   `toss_account_no` (TEXT) - Toss증권 계좌번호
     *   `kis_account_no` (TEXT) - KIS 종합계좌번호 (8자리)
     *   `kis_account_code` (TEXT) - KIS 상품코드 (2자리, 기본 '01')
+    *   `api_permissions` (JSONB) - 거래소별 API 키 권한 정보 (조회, 거래, 출금 등)
     *   `created_at` (TIMESTAMPTZ)
 *   **제약조건**:
     *   `UNIQUE (user_id, exchange, broker_env)` 복합 유니크 키 적용
@@ -105,9 +325,8 @@ erDiagram
     *   함수는 `SECURITY INVOKER`로 실행하며 `authenticated`, `service_role`만 실행할 수 있습니다.
     *   거절은 `id`, `user_id`, `status=PENDING` 조건을 포함한 단일 `UPDATE ... RETURNING` 요청으로 처리하여 승인 선점과 경쟁해도 상태를 덮어쓰지 않습니다.
     *   종목 상세 수동 주문은 요청의 UUID `idempotency_key`를 `trade_proposals.id`로 사용해 외부 주문 전 `PENDING` 레코드를 생성합니다. 같은 키의 재요청은 기존 레코드를 조회하고 원자 선점에 성공한 요청만 거래소로 전송합니다.
-*   **챗봇 제안 생성 규칙**:
-    *   챗봇 경로의 `PENDING` 제안은 `raw_order_payload.precheck_status=OK`이고 현재가·예상 주문금액과 주문 방향에 필요한 잔고·보유수량을 확인했으며 장 운영, 거래 권한, 지원 주문유형, 실거래 한도 검증에 차단 사유가 없을 때만 생성합니다.
-    *   MOCK은 10만 원 하드캡만 우회하고 잔고·보유수량 검증은 유지합니다. REAL 시장가는 슬리피지로 하드캡을 보장할 수 없어 차단합니다.
+    *   챗봇 경로의 `PENDING` 제안은 `raw_order_payload.precheck_status=OK`이고 현재가·예상 주문금액과 주문 방향에 필요한 잔고·보유수량을 확인했으며 장 운영, 거래 권한, 지원 주문유형 검증에 차단 사유가 없을 때만 생성합니다.
+    *   MOCK/REAL 계좌 모두 잔고·보유수량 검증은 유지됩니다.
     *   Binance 현물 매도 검증은 `exchangeInfo.baseAsset`을 우선 조회해 `BTCUSDT`, `BTCEUR` 같은 주문 심볼을 잔고의 `BTC`와 비교하며, 메타데이터 장애 시에만 알려진 quote asset 접미사 제거로 폴백합니다.
     *   외부 주문 후 상세 payload 저장이 실패하면 `status`, `client_order_id`, `external_order_id`를 최소 복구하며, 복구 실패 시 성공 응답 대신 재전송 금지 안내를 반환합니다.
 *   **현재 구현 메모**:
@@ -137,8 +356,10 @@ erDiagram
     *   `triggered_at` (TIMESTAMPTZ) - 조건 도달 시각
     *   `last_checked_at` (TIMESTAMPTZ) - 워커의 마지막 감시 확인 시각
     *   `last_error` (TEXT) - 최근 감시/주문 실패 사유
+    *   `entry_order_proposal_id` (UUID) - 진입 매수 주문의 `trade_proposals.id` 연동
     *   `exit_order_proposal_id` (UUID) - 조건 도달 후 생성된 `trade_proposals.id`
     *   `exit_order_payload` (JSONB) - 자동매도 주문 응답 또는 제안 생성 메타데이터
+    *   `auto_restart` (BOOLEAN) - 익절/손절 완료 후 감시 조건을 자동으로 재시작할지 여부 (기본 false)
     *   `status` (TEXT) - `RUNNING`(감시 중), `COMPLETED`(익손절 완료), `STOPPED`(정지)
     *   `created_at` (TIMESTAMPTZ)
     *   `updated_at` (TIMESTAMPTZ)
@@ -147,7 +368,7 @@ erDiagram
 *   **실행 정책**:
     *   `backend/services/auto_trading_rule_engine.py`가 `RUNNING` 규칙을 조회해 현재가가 익절/손절 가격에 도달했는지 확인합니다.
     *   `execution_mode=PROPOSAL`이면 `trade_proposals`에 `PENDING` 매도 제안만 생성합니다.
-    *   `execution_mode=AUTO`이면 워커가 매도 주문을 직접 전송하고 `trade_proposals`에 결과를 기록합니다. 단, 실거래(`REAL`) 주문 추정 원화 금액이 내부 1회 한도 10만 원을 초과하면 자동 주문 대신 제안 생성으로 우회합니다.
+    *   `execution_mode=AUTO`이면 워커가 매도 주문을 직접 전송하고 `trade_proposals`에 결과를 기록합니다.
 
 ### 2.4.1 broker_order_history
 *   **용도**: 외부 브로커(Toss/KIS/Coinone/Binance)의 실제 주문 원장을 주기적으로 동기화해 저장하는 테이블입니다. 앱 내부 제안 흐름(`trade_proposals`)과 분리하여 실제 미체결/부분체결/체결/취소 결과를 추적합니다.
@@ -201,9 +422,9 @@ erDiagram
     *   `network` (TEXT) - 출금 네트워크
     *   `amount` (NUMERIC) - 출금 수량
     *   `withdraw_fee` (NUMERIC) - 출금 요청 수량과 바이낸스 실제 입금 수량 차이로 계산한 출금 수수료
+    *   `fee_currency` (TEXT) - 출금 수수료 차감 통화/코인 심볼 (예: `XRP`, `TRX`)
     *   `expected_receive_amount` (NUMERIC) - 사전검증 또는 입금 확인 기준 도착 예상 수량
     *   `received_amount` (NUMERIC) - 바이낸스 입금내역에서 확인된 실제 입금 수량
-    *   `fee_currency` (TEXT) - 출금 수수료 단위 코인 심볼
     *   `address` (TEXT) - 바이낸스 입금 주소
     *   `secondary_address` (TEXT) - XRP/XLM/EOS Destination Tag 또는 Memo
     *   `status` (TEXT) - `PENDING`, `APPROVED`, `SUBMITTED`, `COMPLETED`, `FAILED`, `NEEDS_REVIEW` 등
@@ -299,6 +520,27 @@ erDiagram
     *   `rcept_dt` 기준 30일이 지난 `dart_disclosures` row는 물리 삭제합니다.
     *   삭제 시 동일한 `rcept_no`의 `dart_disclosure_analyses`와 `knowledge_chunks(source_type='DISCLOSURE')`를 먼저 함께 삭제합니다.
     *   `cleanup_expired_disclosures` RPC가 5,000건 단위 원자적 배치로 처리하며, 뉴스 수집 전 하루 1회 실행합니다.
+
+### 2.6.2.1 dart_disclosure_analyses
+*   **용도**: OpenDART 공시 원문 문서를 AI 분석 모델이 분석하여 생성한 헤드라인, 요약, 감성(Sentiment), 핵심 포인트, 리스크 포인트, 검토 항목 및 재무 지표 데이터를 저장합니다.
+*   **주요 컬럼**:
+    *   `id` (UUID, PK)
+    *   `rcept_no` (TEXT, UNIQUE) - DART 공시 접수번호 (`dart_disclosures.rcept_no` 연동)
+    *   `category` (TEXT) - 공시 대분류
+    *   `sentiment` (TEXT) - `positive`, `negative`, `caution`, `info`
+    *   `sentiment_label` (TEXT) - 감성 표시 레이블
+    *   `sentiment_message` (TEXT) - 감성 판단 사유 한 줄 메세지
+    *   `confidence` (TEXT) - `high`, `medium`, `low`
+    *   `headline` (TEXT) - AI 추출 헤드라인
+    *   `plain_summary` (TEXT) - 평문 쉬운 공시 요약
+    *   `key_points` (JSONB) - 핵심 포인트 배열
+    *   `risk_points` (JSONB) - 리스크 포인트 배열
+    *   `check_items` (JSONB) - 유의/검토 항목 배열
+    *   `metrics` (JSONB) - 수치 및 재무 지표 배열
+    *   `analysis_source` (TEXT) - 기본 `OPENDART_DOCUMENT`
+    *   `analyzed_at` (TIMESTAMPTZ)
+*   **RLS**:
+    *   공개 조회 가능 (`FOR SELECT USING (true)`). 수정/관리는 `service_role` 전용.
 
 ### 2.6.3 dart_fetch_logs
 *   **용도**: OpenDART 전체 공시 목록 수집 및 최근 1년 백필 작업의 실행 결과를 기록합니다.
@@ -440,23 +682,26 @@ erDiagram
 *   **RLS**:
     *   로그인 사용자는 조회(SELECT) 가능, 생성/수정/삭제는 `service_role` 전용.
 
----
-
-### 2.15 paper_portfolios
-*   **용도**: 모의투자(`MOCK` 환경) 모드 시 사용자의 모의 예수금 및 모의 매매 평단가/수량을 보관하여 가상 자산을 연산해 주는 테이블.
+### 2.15 inquiries
+*   **용도**: 사용자의 1:1 고객 문의사항 및 관리자 답변, 첨부파일 상태를 관리하는 테이블입니다.
 *   **주요 컬럼**:
     *   `id` (UUID, PK)
     *   `user_id` (UUID, FK) - `profiles.id` 참조
-    *   `asset_type` (TEXT) - `CRYPTO` / `STOCK`
-    *   `ticker` (TEXT) - 종목 티커/심볼
-    *   `average_buy_price` (NUMERIC) - 모의 평단가
-    *   `volume` (NUMERIC) - 모의 보유수량
-    *   `virtual_cash` (NUMERIC) - 가상 원화 잔고 (기본 10,000,000원 제공)
+    *   `inquiry_type` (TEXT) - 문의 카테고리 (예: `ACCOUNT`, `TRADING`, `SYSTEM`, `OTHER`)
+    *   `title` (TEXT) - 문의 제목
+    *   `content` (TEXT) - 문의 상세 내용
+    *   `file_name` (TEXT) - 첨부파일명
+    *   `attachment_path` (TEXT) - Supabase Storage (`inquiry-attachments`) 내 저장 경로
+    *   `status` (TEXT) - `RECEIVED`(접수), `WAITING`(답변대기), `COMPLETED`(답변완료), `NEED_MORE`(추가확인), `CANCELED`(취소)
+    *   `answer` (TEXT) - 관리자 답변 본문
+    *   `answered_at` (TIMESTAMPTZ) - 답변 시각
+    *   `created_at` (TIMESTAMPTZ)
     *   `updated_at` (TIMESTAMPTZ)
-*   **제약조건**:
-    *   `UNIQUE (user_id, asset_type, ticker)` 복합 제약조건 적용.
 *   **RLS**:
-    *   `auth.uid() = user_id` 인 사용자만 자신의 모의 잔고 조회 및 관리 가능.
+    *   본인이 작성한 문의만 조회(`SELECT`), 등록(`INSERT`), 접수(`RECEIVED`) 상태에서의 수정/삭제 가능.
+    *   `service_role` 및 관리자는 전체 문의에 대한 조회 및 답변 갱신 가능.
+
+---
 
 ### 2.16 chat_history
 *   **용도**: 사용자와 트레이딩 챗봇(AI 비서) 간의 대화 이력을 데이터베이스에 저장하여, 페이지 새로고침 시에도 이전 대화 맥락을 즉시 로드해 복구하기 위한 테이블.
@@ -565,7 +810,7 @@ erDiagram
 *   **RLS**:
     *   `auth.uid() = user_id` 조건으로 자신의 지식 노트만 조회/생성/수정 가능.
 
-### 2.18 user_memory_facts
+### 2.18.1 user_memory_facts
 *   **용도**: 챗봇/앱 행동 로그에서 추출한 자동메모리 후보를 사용자별 fact로 저장합니다. 챗봇은 명시적인 사용자 선호, 리스크 회피 성향, 관심종목, 반복 실수, 답변 선호를 대화 종료 시 best-effort로 저장하고, 이후 시스템 프롬프트의 자동메모리 문맥과 Obsidian 플러그인의 `자동메모리 가져오기` marker 영역에 반영합니다.
 *   **주요 컬럼**:
     *   `id` (UUID, PK)
@@ -634,98 +879,76 @@ erDiagram
 * The vector index is created only for `embedding_status = 'EMBEDDED'` rows to keep retrieval focused on ready chunks.
 ## 관리자 종목 마스터 정리 테이블
 
-### crypto_assets
+### 2.21 crypto_assets
+*   **용도**: 코인원과 바이낸스의 가상자산 상장/거래 가능 상태를 기본 심볼 단위로 병합해 저장하는 코인 종목 마스터입니다. 랭킹은 기존 코인원 ticker 데이터를 계속 사용하되, 검색/상세/챗봇/주문 진입 화면의 종목 정체성, 표시명, 기본 거래소, 거래 차단 여부는 이 테이블을 우선 참조합니다.
+*   **주요 컬럼**:
+    *   `id` (UUID, PK)
+    *   `base_symbol` (TEXT, UNIQUE) - 거래소 suffix를 제거한 기본 심볼 (예: `BTC`, `ETH`, `XRP`)
+    *   `display_name_ko` (TEXT) - 관리자 보정 한글명
+    *   `display_name_en` (TEXT) - 영문명
+    *   `aliases` (TEXT[]) - 검색 별칭 배열
+    *   `default_exchange` (TEXT) - `COINONE`, `BINANCE`, `BINANCE_UM_FUTURES`
+    *   `is_visible` (BOOLEAN) - 검색 노출 여부
+    *   `admin_trading_blocked` (BOOLEAN) - 주문 제안 및 진입 차단 플래그
+    *   `admin_block_reason`, `admin_note` (TEXT)
+    *   `coinone_listed`, `coinone_symbol`, `coinone_tradable`, `coinone_exchange_status` (BOOLEAN/TEXT)
+    *   `binance_listed`, `binance_symbol`, `binance_tradable`, `binance_status` (BOOLEAN/TEXT)
+    *   `source`, `last_synced_at`, `created_at`, `updated_at` (TIMESTAMPTZ)
+*   **RLS**:
+    *   RLS 활성화되어 있으며 `service_role` 전용 관리. 일반 사용자는 관리자/검색 API를 통한 백엔드 경유 접근.
 
-코인원과 바이낸스의 가상자산 상장/거래 가능 상태를 기본 심볼 단위로 병합해 저장하는 코인 종목 마스터입니다. 랭킹은 기존 코인원 ticker 데이터를 계속 사용하되, 검색/상세/챗봇/주문 진입 화면의 종목 정체성, 표시명, 기본 거래소, 거래 차단 여부는 이 테이블을 우선 참조합니다.
+### 2.22 admin_symbol_reconciliation_runs
+*   **용도**: 관리자가 종목 마스터 정리 및 점검 스캔을 실행한 단위 배치 이력을 저장합니다.
+*   **주요 컬럼**:
+    *   `id` (UUID, PK)
+    *   `started_at`, `finished_at` (TIMESTAMPTZ)
+    *   `status` (TEXT) - `RUNNING`, `COMPLETED`, `FAILED`
+    *   `checked_count`, `normal_count`, `suspicious_count`, `deactivation_candidate_count`, `deletable_count` (INTEGER)
+    *   `raw_summary` (JSONB)
+    *   `created_by` (UUID, FK) - `profiles.id` 참조
+    *   `created_at` (TIMESTAMPTZ)
+*   **RLS**: `service_role` 전용 관리.
 
-- `id` (UUID, PK)
-- `base_symbol` (TEXT, UNIQUE): 거래소 suffix를 제거한 기본 심볼. 예: `H`, `BTC`, `ALICE`
-- `display_name_ko` (TEXT): 관리자 보정 한글명
-- `display_name_en` (TEXT): 거래소 또는 관리자 보정 영문명
-- `aliases` (TEXT[]): 검색 별칭. 예: `Humanity`, `휴머니티`
-- `default_exchange` (TEXT): `COINONE`, `BINANCE`, `BINANCE_UM_FUTURES`
-- `is_visible` (BOOLEAN): 공용 검색 노출 여부
-- `admin_trading_blocked` (BOOLEAN): 거래소 API 상태와 별개로 주문 제안/주문 진입을 막는 관리자 차단 플래그
-- `admin_block_reason` (TEXT)
-- `admin_note` (TEXT)
-- `coinone_listed` (BOOLEAN)
-- `coinone_symbol` (TEXT)
-- `coinone_tradable` (BOOLEAN)
-- `coinone_exchange_status` (TEXT)
-- `coinone_deposit_status` (TEXT)
-- `coinone_withdraw_status` (TEXT)
-- `coinone_raw_status` (JSONB)
-- `coinone_last_synced_at` (TIMESTAMPTZ)
-- `binance_listed` (BOOLEAN)
-- `binance_symbol` (TEXT)
-- `binance_tradable` (BOOLEAN)
-- `binance_status` (TEXT)
-- `binance_raw_status` (JSONB)
-- `binance_last_synced_at` (TIMESTAMPTZ)
-- `source` (TEXT)
-- `last_synced_at` (TIMESTAMPTZ)
-- `created_at` (TIMESTAMPTZ)
-- `updated_at` (TIMESTAMPTZ)
+### 2.23 admin_symbol_reconciliation_items
+*   **용도**: 종목 마스터 정리 스캔 결과의 개별 심볼 판정 결과를 저장합니다.
+*   **주요 컬럼**:
+    *   `id` (UUID, PK)
+    *   `run_id` (UUID, FK) - `admin_symbol_reconciliation_runs.id` 참조 (CASCADE DELETE)
+    *   `symbol` (TEXT), `name` (TEXT)
+    *   `source_table` (TEXT) - `kis_stock_master`, `kis_stock_turnover_latest`
+    *   `market_country` (TEXT), `market_segment` (TEXT)
+    *   `status` (TEXT) - `NORMAL`, `SUSPICIOUS`, `DEACTIVATION_CANDIDATE`, `INACTIVE`, `DELETABLE`
+    *   `reason` (TEXT)
+    *   `suggested_action` (TEXT) - `NONE`, `REVIEW`, `DEACTIVATE`, `DELETE_CACHE`, `DELETE_MASTER`, `RESTORE`
+    *   `broker_check_result` (JSONB)
+    *   `reference_count` (INTEGER), `last_seen_at` (TIMESTAMPTZ)
+    *   `created_at` (TIMESTAMPTZ)
+*   **RLS**: `service_role` 전용 관리.
 
-**RLS/권한**
+### 2.24 symbol_aliases
+*   **용도**: 임시코드, 폐기코드, 종목명 변경 등으로 인해 사용자 검색 결과에서 정식 심볼로 연결하거나 배지를 표시해야 하는 심볼 매핑을 저장합니다.
+*   **주요 컬럼**:
+    *   `id` (UUID, PK)
+    *   `alias_symbol` (TEXT, UNIQUE) - 임시 또는 별칭 심볼
+    *   `canonical_symbol` (TEXT) - 정식 심볼
+    *   `alias_type` (TEXT) - `TEMPORARY`, `RENAMED`, `DELISTED`, `MANUAL`
+    *   `label` (TEXT) - 화면 표시 배지 (예: `임시코드`)
+    *   `reason` (TEXT), `market_country` (TEXT), `source` (TEXT)
+    *   `is_active` (BOOLEAN)
+    *   `created_at`, `updated_at` (TIMESTAMPTZ)
+*   **RLS**: `service_role` 전용 관리.
 
-- RLS를 활성화하고 `service_role`만 전체 관리할 수 있습니다.
-- 프론트엔드는 직접 Supabase에서 이 테이블을 읽지 않고 Flask 관리자/검색 API를 통해 접근합니다.
+---
 
-**운영 규칙**
+## 3. 주요 뷰(View) 및 RPC 함수
 
-- `H`처럼 코인원에만 있는 종목은 `coinone_listed=true`, `binance_listed=false`, `default_exchange=COINONE`으로 관리합니다.
-- `ALICE`처럼 바이낸스에만 있는 종목은 `coinone_listed=false`, `binance_listed=true`, `default_exchange=BINANCE`로 관리합니다.
-- `admin_trading_blocked=true`이면 검색에는 표시할 수 있어도 주문 가능 목록과 챗봇 주문 제안에서는 차단합니다.
+### 3.1 admin_user_usage_total_tokens_summary (View)
+*   **용도**: 관리자 대시보드에서 사용자별, 모델별 챗봇 토큰(Input/Output) 및 총 사용량을 일관되게 집계하여 보여주는 통합 뷰입니다.
+*   **주요 컬럼**: `user_id`, `email`, `nickname`, `model`, `total_prompt_tokens`, `total_completion_tokens`, `total_tokens`, `request_count`, `last_used_at`
 
-### admin_symbol_reconciliation_runs
+### 3.2 v_chatbot_qa_logs (View)
+*   **용도**: 챗봇 답변 품질 평가 및 질문/답변 이벤트 로그 모니터링을 위한 통합 뷰입니다.
+*   **주요 컬럼**: `event_id`, `user_id`, `user_message`, `bot_reply`, `tools_used`, `created_at`
 
-관리자가 종목 마스터 정리 스캔을 실행한 단위 이력을 저장합니다. `SKHYV`처럼 정식 상장 전 사용되던 임시 해외주식 심볼이 검색 후보나 랭킹 캐시에 남아 있는지 점검할 때 사용합니다.
-
-- `id` (UUID, PK)
-- `started_at` (TIMESTAMPTZ)
-- `finished_at` (TIMESTAMPTZ)
-- `status` (TEXT): `RUNNING`, `COMPLETED`, `FAILED`
-- `checked_count` (INTEGER)
-- `normal_count` (INTEGER)
-- `suspicious_count` (INTEGER)
-- `deactivation_candidate_count` (INTEGER)
-- `deletable_count` (INTEGER)
-- `raw_summary` (JSONB)
-- `created_by` (UUID)
-- `created_at` (TIMESTAMPTZ)
-
-### admin_symbol_reconciliation_items
-
-종목 마스터 정리 스캔 결과의 개별 심볼 판정 결과를 저장합니다.
-
-- `id` (UUID, PK)
-- `run_id` (UUID, FK)
-- `symbol` (TEXT)
-- `name` (TEXT)
-- `source_table` (TEXT): `kis_stock_master`, `kis_stock_turnover_latest`
-- `market_country` (TEXT)
-- `market_segment` (TEXT)
-- `status` (TEXT): `NORMAL`, `SUSPICIOUS`, `DEACTIVATION_CANDIDATE`, `INACTIVE`, `DELETABLE`
-- `reason` (TEXT)
-- `suggested_action` (TEXT): `NONE`, `REVIEW`, `DEACTIVATE`, `DELETE_CACHE`, `DELETE_MASTER`, `RESTORE`
-- `broker_check_result` (JSONB)
-- `reference_count` (INTEGER)
-- `last_seen_at` (TIMESTAMPTZ)
-- `created_at` (TIMESTAMPTZ)
-
-### symbol_aliases
-
-임시코드, 폐기코드, 종목명 변경 등으로 인해 사용자 검색 결과에서 정식 심볼로 연결하거나 배지를 표시해야 하는 심볼 매핑을 저장합니다.
-
-- `id` (UUID, PK)
-- `alias_symbol` (TEXT, UNIQUE): 임시 또는 별칭 심볼
-- `canonical_symbol` (TEXT): 정식 심볼
-- `alias_type` (TEXT): `TEMPORARY`, `RENAMED`, `DELISTED`, `MANUAL`
-- `label` (TEXT): 화면 표시 배지. 예: `임시코드`
-- `reason` (TEXT)
-- `market_country` (TEXT)
-- `source` (TEXT)
-- `is_active` (BOOLEAN)
-- `created_at` (TIMESTAMPTZ)
-- `updated_at` (TIMESTAMPTZ)
+### 3.3 cleanup_expired_disclosures() (RPC Function)
+*   **용도**: `rcept_dt` 기준 30일이 경과된 `dart_disclosures` 및 연관된 `dart_disclosure_analyses`, `knowledge_chunks` 데이터를 5,000건 배치 단위로 원자적 물리 삭제하는 정리 함수입니다.

@@ -13,7 +13,6 @@ from backend.services.toss_client import TossClient
 from backend.utils.crypto_helper import CryptoHelper
 
 
-REAL_ORDER_LIMIT_KRW = 100000.0
 USD_KRW_FALLBACK = 1500.0
 SUPPORTED_EXCHANGES = {"TOSS", "KIS", "COINONE", "BINANCE", "BINANCE_UM_FUTURES"}
 

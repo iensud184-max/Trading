@@ -195,7 +195,6 @@ sequenceDiagram
 
 - `execution_mode=PROPOSAL`은 조건 도달 시 매도 제안만 생성합니다.
 - `execution_mode=AUTO`는 조건 도달 시 워커가 매도 주문을 직접 전송합니다.
-- 실거래(`REAL`) 자동매도 추정 금액이 내부 1회 한도 10만 원을 넘으면 자동 주문 대신 제안 생성으로 우회합니다.
 - Binance USD-M 선물은 롱 포지션 청산 방향(`BOTH + reduceOnly SELL`)만 자동매도 흐름에 맞습니다. 숏 청산은 매수 청산이므로 별도 정책으로 분리해야 합니다.
 
 ## 4. 뉴스 수집 흐름

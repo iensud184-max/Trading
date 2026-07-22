@@ -440,9 +440,9 @@ def test_precheck_blockers_apply_real_order_limit_only_to_real_environment():
     real_blockers = tool_registry._collect_precheck_blockers(precheck, "REAL")
 
     assert len(mock_blockers) == 5
-    assert len(real_blockers) == 6
+    assert len(real_blockers) == 5
     assert all("100,000원" not in blocker for blocker in mock_blockers)
-    assert any("100,000원" in blocker for blocker in real_blockers)
+    assert all("100,000원" not in blocker for blocker in real_blockers)
 
 
 

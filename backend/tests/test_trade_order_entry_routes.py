@@ -338,14 +338,14 @@ def test_blocked_precheck_does_not_issue_proposal_token(client, monkeypatch):
             "estimated_amount_krw": 150000.0,
             "available_cash": 250000.0,
             "holding_qty": 0.0,
-            "warnings": ["실거래 1회 주문 한도 100,000원을 초과했습니다."],
+            "warnings": [],
             "balance_check_failed": False,
             "is_market_closed": False,
-            "insufficient_cash": False,
+            "insufficient_cash": True,
             "insufficient_holding": False,
             "insufficient_permission": False,
             "futures_real_blocked": False,
-            "exceeds_real_order_limit": True,
+            "exceeds_real_order_limit": False,
         },
     )
 
@@ -355,7 +355,7 @@ def test_blocked_precheck_does_not_issue_proposal_token(client, monkeypatch):
     data = response.get_json()["data"]
     assert data["precheck_token"] is None
     assert data["can_create_proposal"] is False
-    assert data["blockers"] == ["실거래 1회 주문 한도 100,000원을 초과했습니다."]
+    assert data["blockers"] == ["주문 가능 잔액이 부족합니다."]
 
 
 def test_crypto_precheck_blocks_admin_blocked_asset_before_exchange_client(client, monkeypatch):

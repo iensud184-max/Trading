@@ -9,6 +9,7 @@ import AdminAiFundDashboard from './AdminAiFundDashboard.jsx'
 import {
   ActiveSignalPanel,
   AdvancedDataToolsPanel,
+  AdvancedToolsContainer,
   AdvancedTrainingToolsPanel,
   ExecutionChecklistPanel,
   JobHistorySection,
@@ -26,6 +27,7 @@ import {
   UniverseManagementPanel,
   V8OptunaPanel,
 } from './adminMlDataPanels.jsx'
+
 import {
   formatPath,
   legacyAutomationPresets,
@@ -83,6 +85,8 @@ export default function AdminMlData({ isLoggedIn, userEmail, handleLogout, hideH
   const [tuningMessage, setTuningMessage] = useState('')
   const [selectedLogJob, setSelectedLogJob] = useState(null)
   const [showAdvancedTools, setShowAdvancedTools] = useState(false)
+  const [advancedSubTab, setAdvancedSubTab] = useState('hpo')
+
 
   const selectedPreset = useMemo(() => presets[mode], [mode])
 
@@ -882,75 +886,58 @@ export default function AdminMlData({ isLoggedIn, userEmail, handleLogout, hideH
         />
 
         {showAdvancedTools ? (
-        <>
-        <V8OptunaPanel
-          presets={v8TuningPresets}
-          trials={tuneTrials}
-          updateConfig={tuneUpdateConfig}
-          loadingKey={tuningLoadingKey}
-          message={tuningMessage}
-          isLoggedIn={isLoggedIn}
-          onTrialsChange={setTuneTrials}
-          onUpdateConfigChange={setTuneUpdateConfig}
-          onRun={handleRunTuning}
-        />
+          <AdvancedToolsContainer
+            activeSubTab={advancedSubTab}
+            onSubTabChange={setAdvancedSubTab}
+          >
+            {advancedSubTab === 'hpo' && (
+              <V8OptunaPanel
+                presets={v8TuningPresets}
+                trials={tuneTrials}
+                updateConfig={tuneUpdateConfig}
+                loadingKey={tuningLoadingKey}
+                message={tuningMessage}
+                isLoggedIn={isLoggedIn}
+                onTrialsChange={setTuneTrials}
+                onUpdateConfigChange={setTuneUpdateConfig}
+                onRun={handleRunTuning}
+              />
+            )}
 
-        <AdvancedDataToolsPanel
-          presets={presets}
-          mode={mode}
-          selectedPreset={selectedPreset}
-          form={form}
-          result={result}
-          error={error}
-          loading={loading}
-          onApplyPreset={applyPreset}
-          onUpdateField={updateField}
-          onExport={handleExport}
-        />
-        </>
+            {advancedSubTab === 'custom' && (
+              <div className="space-y-6">
+                <AdvancedDataToolsPanel
+                  presets={presets}
+                  mode={mode}
+                  selectedPreset={selectedPreset}
+                  form={form}
+                  result={result}
+                  error={error}
+                  loading={loading}
+                  onApplyPreset={applyPreset}
+                  onUpdateField={updateField}
+                  onExport={handleExport}
+                />
+                <ReportPanel
+                  loading={reportLoading}
+                  message={reportMessage}
+                  onGenerate={handleGenerateReport}
+                />
+                <ReportHistoryPanel
+                  reports={reportHistory}
+                  loading={reportHistoryLoading}
+                  error={reportHistoryError}
+                  onRefresh={loadReportHistory}
+                />
+              </div>
+            )}
+
+            {advancedSubTab === 'universe' && (
+              <UniverseManagementPanel isLoggedIn={isLoggedIn} />
+            )}
+          </AdvancedToolsContainer>
         ) : null}
 
-        {showAdvancedTools ? (
-        <ModelResultsSection
-          results={modelResults}
-          loading={modelResultsLoading}
-          error={modelResultsError}
-          isLoggedIn={isLoggedIn}
-          onRefresh={loadModelResults}
-        />
-        ) : null}
-
-        {showAdvancedTools ? (
-        <RegistryStatusSection
-          rowsByAsset={registryRows}
-          loading={registryLoading}
-          error={registryError}
-          message={registryMessage}
-          activatingKey={activatingRegistryKey}
-          promotionChecks={promotionChecks}
-          promotionChecksLoading={promotionChecksLoading}
-          onActivate={handleActivateRegistry}
-        />
-        ) : null}
-
-        {showAdvancedTools ? <ExecutionChecklistPanel /> : null}
-
-        {showAdvancedTools ? (
-        <ReportPanel
-          loading={reportLoading}
-          message={reportMessage}
-          onGenerate={handleGenerateReport}
-        />
-        ) : null}
-
-        {showAdvancedTools ? (
-        <ReportHistoryPanel
-          reports={reportHistory}
-          loading={reportHistoryLoading}
-          error={reportHistoryError}
-          onRefresh={loadReportHistory}
-        />
-        ) : null}
 
         <section className="grid gap-6 grid-cols-1">
           {showAdvancedTools ? (

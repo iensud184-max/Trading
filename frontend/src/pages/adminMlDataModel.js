@@ -65,67 +65,35 @@ export const presets = {
 
 export const trainingPresets = [
   {
-    key: 'stock-v6',
-    label: '주식 v6 학습',
-    config: 'ml/configs/lgbm_stock_v6.yaml',
-    riskConfig: 'ml/configs/lgbm_stock_risk_v6.yaml',
-    summaryOutput: 'ml/data/processed/stock_v6_summary.json',
+    key: 'stock-v8',
+    label: '주식 v8 학습',
+    config: 'ml/configs/lgbm_stock_v8.yaml',
+    riskConfig: 'ml/configs/lgbm_stock_risk_v8.yaml',
+    summaryOutput: 'ml/data/processed/stock_v8_summary.json',
   },
   {
-    key: 'crypto-v6',
-    label: '코인 v6 학습',
-    config: 'ml/configs/lgbm_crypto_v6.yaml',
-    riskConfig: 'ml/configs/lgbm_crypto_risk_v6.yaml',
-    summaryOutput: 'ml/data/processed/crypto_v6_summary.json',
+    key: 'stock-v11',
+    label: '주식 v11 학습',
+    config: 'ml/configs/lgbm_stock_v11.yaml',
+    riskConfig: 'ml/configs/lgbm_stock_risk_v11.yaml',
+    summaryOutput: 'ml/data/processed/stock_v11_summary.json',
   },
   {
-    key: 'stock-v7',
-    label: '주식 v7 학습',
-    config: 'ml/configs/lgbm_stock_v7.yaml',
-    riskConfig: 'ml/configs/lgbm_stock_risk_v7.yaml',
-    summaryOutput: 'ml/data/processed/stock_v7_summary.json',
-  },
-  {
-    key: 'crypto-v7',
-    label: '코인 v7 학습',
-    config: 'ml/configs/lgbm_crypto_v7.yaml',
-    riskConfig: 'ml/configs/lgbm_crypto_risk_v7.yaml',
-    summaryOutput: 'ml/data/processed/crypto_v7_summary.json',
+    key: 'crypto-v10',
+    label: '코인 v10 학습 (248종목)',
+    config: 'ml/configs/lgbm_crypto_v10.yaml',
+    riskConfig: 'ml/configs/lgbm_crypto_risk_v10.yaml',
+    summaryOutput: 'ml/data/processed/crypto_v10_summary.json',
   },
 ]
 
 export const tuningPresets = [
-  {
-    key: 'stock-v7-tune',
-    label: '주식 v7 HPO 튜닝',
-    config: 'ml/configs/lgbm_stock_v7.yaml',
-    defaultTrials: 20,
-    summary: '주식 v7 모델에 대해 Optuna로 최적의 하이퍼파라미터(learning_rate, num_leaves 등)를 탐색합니다.',
-    version: 'v7',
-  },
-  {
-    key: 'crypto-v7-tune',
-    label: '코인 v7 HPO 튜닝',
-    config: 'ml/configs/lgbm_crypto_v7.yaml',
-    defaultTrials: 20,
-    summary: '코인 v7 모델에 대해 Optuna로 최적의 하이퍼파라미터를 탐색합니다.',
-    version: 'v7',
-  },
   {
     key: 'stock-v8-tune',
     label: '주식 v8 HPO 튜닝',
     config: 'ml/configs/lgbm_stock_v8.yaml',
     defaultTrials: 20,
     summary: '주식 v8 모델에 대해 Optuna로 하이퍼파라미터를 탐색합니다 (잔차 라벨 기반).',
-    version: 'v8',
-    isNew: true,
-  },
-  {
-    key: 'crypto-v8-tune',
-    label: '코인 v8 HPO 튜닝',
-    config: 'ml/configs/lgbm_crypto_v8.yaml',
-    defaultTrials: 20,
-    summary: '코인 v8 모델에 대해 Optuna로 하이퍼파라미터를 탐색합니다 (30m 캔들 기반).',
     version: 'v8',
     isNew: true,
   },
@@ -142,28 +110,9 @@ export const tuningPresets = [
 
 export const automationPresets = [
   {
-    key: 'stock-v7-full',
-    label: '주식 v7 자동 수집+학습',
-    summary: 'Toss stock_core_90 수집 후 v7 학습까지 한 번에 실행',
-    version: 'v7',
-  },
-  {
-    key: 'crypto-v7-full',
-    label: '코인 v7 자동 수집+학습',
-    summary: 'Binance crypto_core_30 수집 후 v7 학습까지 한 번에 실행 (1h 캔들)',
-    version: 'v7',
-  },
-  {
     key: 'stock-v8-full',
     label: '주식 v8 자동 수집+학습',
     summary: '잔차 수익률 라벨 + Ridge 앙상블 주식 모델 (KOSPI/NASDAQ 시장 노이즈 제거)',
-    version: 'v8',
-    isNew: true,
-  },
-  {
-    key: 'crypto-v8-full',
-    label: '코인 v8 자동 수집+학습',
-    summary: '일평균 100만$↑ & 상장 1년↑ 코인 동적 스크리닝 및 가변 슬리피지가 적용된 v8 학습 모델 (30m 캔들)',
     version: 'v8',
     isNew: true,
   },
@@ -190,10 +139,10 @@ export const automationPresets = [
   },
 ]
 
-export const operationalAutomationPresets = automationPresets.filter((preset) => ['stock-v8-full', 'crypto-v10-full', 'kr-stock-v1-full', 'us-stock-v1-full'].includes(preset.key))
-export const legacyAutomationPresets = automationPresets.filter((preset) => !['stock-v8-full', 'crypto-v10-full', 'kr-stock-v1-full', 'us-stock-v1-full'].includes(preset.key))
+export const operationalAutomationPresets = automationPresets
+export const legacyAutomationPresets = []
+export const v8TuningPresets = tuningPresets
 
-export const v8TuningPresets = tuningPresets.filter((preset) => ['v8', 'v10'].includes(preset.version))
 
 
 export function formatMetric(value) {

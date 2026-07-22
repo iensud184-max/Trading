@@ -207,5 +207,6 @@ cancel_order(order_id: str) -> ExchangeOrder
 ### 데이터베이스 적용 보류
 
 - 원장 마이그레이션 `20260722113315_add_ai_fund_execution_ledger.sql`은 생성됐지만, 이 작업 중 원격 또는 로컬 Supabase DB에 적용하지는 않았다.
-- `operation_mode`, `canary_max_order_amount` 설정 컬럼용 후속 마이그레이션은 Supabase CLI 실행 승인 시스템의 크레딧 부족으로 생성이 차단됐다. 수동 파일 생성으로 우회하지 않았다.
+- `operation_mode`, `canary_max_order_amount` 설정 컬럼용 후속 마이그레이션 `20260722120020_add_ai_fund_operation_mode.sql`을 공식 Supabase CLI로 생성했다.
+- 원격 DB migration history에는 로컬에 없는 `20260716065109`가 있고, 로컬에는 원격 이력에 없는 여러 마이그레이션이 있다. 원격 스키마에는 이력 밖 변경(예: `target_take_profit_pct`)도 확인됐다. 따라서 이력 복구나 `db push`를 자동 실행하지 않았으며, 원격 DB 관리자와 이력 정합성 방식을 확정한 뒤에만 실제 적용한다.
 - 따라서 현재 배포 DB에서는 운용 모드가 없는 기존 설정을 `LIVE` 기본값으로 처리한다. PAPER/CANARY는 후속 설정 컬럼 마이그레이션을 적용한 뒤에만 관리자 UI에서 활성화해야 한다.

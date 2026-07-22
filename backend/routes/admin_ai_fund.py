@@ -35,12 +35,34 @@ def upsert_ai_fund_config():
         auth_header = request.headers.get("Authorization")
         _extract_bearer_token(auth_header)
         
-        data = request.json or {}
+        data = dict(request.json or {})
         user_id = data.get("user_id")
-        exchange_type = data.get("exchange_type", "coinone")
+        exchange_type = str(data.get("exchange_type", "coinone")).lower()
         
         if not user_id:
             return jsonify(format_error_payload(ValueError("user_id는 필수입니다."), "입력값 에러")), 400
+
+        operation_mode = str(data.get("operation_mode") or "PAPER").upper()
+        if operation_mode not in {"PAPER", "CANARY", "LIVE"}:
+            return jsonify(format_error_payload(
+                ValueError("operation_mode는 PAPER, CANARY, LIVE 중 하나여야 합니다."),
+                "입력값 에러",
+            )), 400
+        data["exchange_type"] = exchange_type
+        data["operation_mode"] = operation_mode
+        if operation_mode == "CANARY":
+            try:
+                canary_max_order_amount = float(data.get("canary_max_order_amount") or 0.0)
+            except (TypeError, ValueError):
+                canary_max_order_amount = 0.0
+            if canary_max_order_amount <= 0:
+                return jsonify(format_error_payload(
+                    ValueError("CANARY 모드에는 0보다 큰 canary_max_order_amount가 필요합니다."),
+                    "입력값 에러",
+                )), 400
+            data["canary_max_order_amount"] = canary_max_order_amount
+        elif "canary_max_order_amount" in data:
+            data["canary_max_order_amount"] = None
 
         res = safe_query_supabase_as_service_role(
             "admin_ai_fund_configs",

@@ -146,4 +146,4 @@
 
 1차 코드 구현은 완료됐으나, `ai_fund_orders`, `ai_fund_fills`, `ai_fund_positions`, `ai_fund_reconciliation_runs` 마이그레이션이 실제 Supabase DB에 적용되기 전이다. 부분 익절·트레일링·DCA·그리드·전략별 예산은 이 원장을 공통 실행 경로로 사용해야 하므로, 원장 없는 별도 주문 경로로 선행 구현하지 않는다.
 
-또한 PAPER/CANARY 설정 컬럼용 마이그레이션 생성이 Supabase CLI 승인 시스템의 크레딧 부족으로 보류되어 있다. 해당 승인과 DB 적용 검증이 끝나면 2차 전략 종료 정책부터 순서대로 구현한다.
+PAPER/CANARY 설정 컬럼 마이그레이션은 생성됐지만, 원격 DB migration history와 로컬 파일의 불일치 때문에 아직 적용하지 않았다. 해당 이력 정합성 해결과 DB 적용 검증이 끝나면 2차 전략 종료 정책부터 순서대로 구현한다.

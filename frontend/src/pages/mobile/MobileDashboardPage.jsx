@@ -37,13 +37,13 @@ import {
   getHoldingEvaluationKrw,
   getHoldingMarketType,
   getPortfolioProfitRate,
-  getWatchlistCurrentPrice,
   isCryptoAccount,
   mergeAccountBalances,
   mergeBalanceWithCompletedTransfers,
   mergeBalanceWithTradeEstimates,
   normalizeDashboardTab,
   parsePriceNumber,
+  resolveDashboardWatchlistCurrentPrice,
   sortDashboardHoldings,
   toPositiveKrwAmount,
   toNumber,
@@ -886,7 +886,7 @@ export default function MobileDashboardPage({
                           ?? sourcePayload.current_price
                           ?? sourcePayload.price,
                         )
-                        const currentPrice = getWatchlistCurrentPrice(item)
+                        const currentPrice = resolveDashboardWatchlistCurrentPrice(item, balance?.holdings)
                           ?? parsePriceNumber(
                             item.current_price
                             ?? item.livePrice

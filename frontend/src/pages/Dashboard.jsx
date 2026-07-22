@@ -37,13 +37,13 @@ import {
   getHoldingEvaluationKrw,
   getHoldingMarketType,
   getPortfolioProfitRate,
-  getWatchlistCurrentPrice,
   isCryptoAccount,
   mergeAccountBalances,
   mergeBalanceWithCompletedTransfers,
   mergeBalanceWithTradeEstimates,
   normalizeDashboardTab,
   parsePriceNumber,
+  resolveDashboardWatchlistCurrentPrice,
   sortDashboardHoldings,
   toPositiveKrwAmount,
   toNumber,
@@ -869,7 +869,7 @@ export default function Dashboard({ isLoggedIn, userEmail, handleLogout, userPro
                         {dashboardWatchlist.map((item) => {
                           const stockCurrency = getDashboardWatchlistCurrency(item)
                           const savedPrice = parsePriceNumber(item.latestPrice ?? item.average)
-                          const currentPrice = getWatchlistCurrentPrice(item) ?? savedPrice
+                          const currentPrice = resolveDashboardWatchlistCurrentPrice(item, balance?.holdings) ?? savedPrice
                           const hasSavedPrice = Number.isFinite(savedPrice) && savedPrice > 0
                           const hasCurrentPrice = Number.isFinite(currentPrice)
                           const priceDelta = hasSavedPrice && hasCurrentPrice ? currentPrice - savedPrice : 0

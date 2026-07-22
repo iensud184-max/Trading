@@ -270,6 +270,38 @@ export const getWatchlistCurrentPrice = (item = {}) => {
   )
 }
 
+const normalizeWatchlistSymbol = (value = '') => (
+  String(value || '').trim().toUpperCase().replace(/(?:_?KRW|USDT)$/i, '')
+)
+
+export const resolveDashboardWatchlistCurrentPrice = (item = {}, holdings = []) => {
+  const watchSymbol = normalizeWatchlistSymbol(item.id || item.symbol || item.ticker)
+  const watchAssetType = getDashboardWatchlistAssetType(item)
+  const watchExchange = String(item.exchange || item.account || item.sourcePayload?.exchange || '').toUpperCase()
+
+  if (watchSymbol && Array.isArray(holdings)) {
+    const matchingHoldings = holdings.filter((holding) => {
+      const holdingSymbol = normalizeWatchlistSymbol(holding.symbol || holding.ticker || holding.id)
+      if (holdingSymbol !== watchSymbol) return false
+
+      const holdingAssetType = String(
+        holding.asset_type
+        || (['COINONE', 'BINANCE', 'BINANCE_UM_FUTURES'].includes(String(holding.exchange || '').toUpperCase()) ? 'CRYPTO' : 'STOCK'),
+      ).toUpperCase()
+      return holdingAssetType === watchAssetType
+    })
+
+    const exactExchangeHolding = matchingHoldings.find((holding) => {
+      const holdingExchange = String(holding.raw_exchange || holding.exchange || holding.account_type || '').toUpperCase()
+      return watchExchange && holdingExchange.includes(watchExchange)
+    })
+    const holdingPrice = parsePriceNumber((exactExchangeHolding || matchingHoldings[0])?.current_price)
+    if (Number.isFinite(holdingPrice) && holdingPrice > 0) return holdingPrice
+  }
+
+  return getWatchlistCurrentPrice(item)
+}
+
 export const getDashboardWatchlistAssetType = (item = {}) => {
   const assetType = String(item.assetType || item.asset_type || '').toUpperCase()
   const market = String(item.market || '').toUpperCase()

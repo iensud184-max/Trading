@@ -12,6 +12,7 @@ import {
   mergeBalanceWithCompletedTransfers,
   mergeBalanceWithTradeEstimates,
   normalizeDashboardTab,
+  resolveDashboardWatchlistCurrentPrice,
   sortDashboardHoldings,
   toKrwAmount,
 } from './dashboardModel.js'
@@ -173,6 +174,26 @@ describe('dashboardModel', () => {
     assert.deepEqual(getDashboardWatchlistChartConfig(cryptoItem), { exchange: 'COINONE', brokerEnv: 'REAL', interval: '1h' })
     assert.equal(getDashboardWatchlistCurrency(binanceItem), 'USDT')
     assert.deepEqual(getDashboardWatchlistChartConfig(binanceItem), { exchange: 'BINANCE', brokerEnv: 'REAL', interval: '1h' })
+  })
+
+  it('uses matching holding current price before chart or saved watchlist prices', () => {
+    const watchlistItem = {
+      id: 'AAPL',
+      currentPrice: 210,
+      latestPrice: 205,
+      assetType: 'STOCK',
+      exchange: 'TOSS',
+    }
+    const holdings = [
+      {
+        symbol: 'AAPL',
+        current_price: 325.64,
+        asset_type: 'STOCK',
+        exchange: 'TOSS',
+      },
+    ]
+
+    assert.equal(resolveDashboardWatchlistCurrentPrice(watchlistItem, holdings), 325.64)
   })
 
   it('builds balance requests from registered key status', () => {

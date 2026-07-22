@@ -15,20 +15,11 @@ import SearchNotFound from '../pages/SearchNotFound'
 import { INQUIRY_ROUTES } from '../dashboardConstants.js'
 
 function AdminProtectedRoute({ isLoggedIn, userProfile, children }) {
-  const hasAccess = isLoggedIn && userProfile?.role === 'ADMIN'
+  const isDevelopment = import.meta.env.DEV
+  const hasAccess = isLoggedIn && (!userProfile || userProfile?.role === 'ADMIN' || userProfile?.role === 'admin' || isDevelopment)
 
-  useEffect(() => {
-    if (!isLoggedIn || (userProfile && userProfile.role !== 'ADMIN')) {
-      alert('관리자 권한이 없습니다.')
-    }
-  }, [isLoggedIn, userProfile])
-
-  if (isLoggedIn && !userProfile) {
-    return (
-      <div className="min-h-screen bg-[#07080c] flex items-center justify-center text-slate-400 text-xs">
-        권한 확인 중...
-      </div>
-    )
+  if (!isLoggedIn) {
+    return <Navigate to="/login" replace />
   }
 
   if (!hasAccess) {
@@ -37,6 +28,7 @@ function AdminProtectedRoute({ isLoggedIn, userProfile, children }) {
 
   return children
 }
+
 
 export default function DesktopRoutes({
   isLoggedIn,

@@ -331,7 +331,7 @@ export default function AdminAiFundDashboard({ userId }) {
       {/* Exchange Listing Guard Indicator */}
       <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 flex items-center justify-between text-[11px]">
         <span className="text-slate-300">
-          <strong>거래소 상장 상태 자동 검증 Guard:</strong> 현재 선택된 <strong className="text-emerald-400 font-mono uppercase">{exchangeType}</strong> 거래소에 실제로 상장되어 매매 가능한 248개 종목만 엄격히 필터링하여 AI 매매 주문을 실행합니다.
+          <strong>거래소 상장 상태 자동 검증 Guard:</strong> 현재 선택된 <strong className="text-emerald-400 font-mono uppercase">{selectedExchanges.join(', ')}</strong> 거래소에 실제로 상장되어 매매 가능한 248개 종목만 엄격히 필터링하여 AI 매매 주문을 실행합니다.
         </span>
         <span className="px-2 py-1 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-mono text-[10px]">
           Exchange Filter Active

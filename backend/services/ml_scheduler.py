@@ -43,12 +43,9 @@ crypto = CryptoHelper(ENCRYPTION_KEY)
 logger = logging.getLogger(__name__)
 
 def get_stock_shadow_preset_keys() -> list[str]:
-    """주식 자동화 시 실행할 프리셋 키 목록을 반환합니다.
-    
-    serving 모델과 동일한 config를 사용하는 v11이 우선이며,
-    국내/해외 분리 shadow 모델(kr-v1, us-v1)은 보조 학습으로 병렬 실행됩니다.
-    """
-    return ["kr-stock-v1-full", "us-stock-v1-full", "stock-v11-full"]
+    """주식 자동화 시 실행할 프리셋 키 목록을 반환합니다 (국내주식/해외주식 이원화)."""
+    return ["kr-stock-v1-full", "us-stock-v1-full"]
+
 
 
 def get_crypto_shadow_preset_keys() -> list[str]:
@@ -696,9 +693,10 @@ def start_ml_automation_scheduler(ml_automation_enabled: bool, supabase_service_
                                                         sync_model_registry_to_supabase(auth_header, training_config.get("summary_output"))
                                                         record_model_audit_jobs(
                                                             auth_header,
-                                                            "stock",
+                                                            dataset_config["asset_type"],
                                                             resolve_model_version_from_config(training_config["config"]),
                                                         )
+
                                                     except Exception as e:
                                                         logger.exception(f"[StockAutomation] Preset={preset_key} run failed: %s", e)
                                                         if dataset_job:

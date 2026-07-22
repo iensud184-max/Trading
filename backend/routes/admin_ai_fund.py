@@ -46,8 +46,10 @@ def upsert_ai_fund_config():
             "admin_ai_fund_configs",
             method="POST",
             json_data=data,
+            params={"on_conflict": "user_id,exchange_type"},
             extra_headers={"Prefer": "resolution=merge-duplicates"}
         )
+
         return jsonify({"success": True, "config": res}), 200
     except ValueError as val_err:
         return jsonify(format_error_payload(val_err, "인증 에러")), 401

@@ -11,6 +11,7 @@ export default function AdminAiFundDashboard({ userId }) {
   const [currentUserId, setCurrentUserId] = useState(userId || '')
   const [tradeLogs, setTradeLogs] = useState([])
   const [lastCheckTime, setLastCheckTime] = useState(new Date().toLocaleTimeString())
+  const [configId, setConfigId] = useState(null)
 
   useEffect(() => {
     if (!currentUserId) {
@@ -34,10 +35,14 @@ export default function AdminAiFundDashboard({ userId }) {
         .maybeSingle()
 
       if (configData) {
+        setConfigId(configData.id || null)
         setCapital(configData.allocated_capital || 5000000)
         setRiskPreset(configData.risk_preset || 'neutral')
         setIsActive(configData.is_active || false)
+      } else {
+        setConfigId(null)
       }
+
 
       const { data: logsData } = await supabase
         .from('admin_ai_trade_logs')
@@ -106,7 +111,7 @@ export default function AdminAiFundDashboard({ userId }) {
     setMessage('')
     try {
       const nextActive = !isActive
-      const { error } = await supabase.from('admin_ai_fund_configs').upsert({
+      const payload = {
         user_id: currentUserId,
         exchange_type: exchangeType,
         allocated_capital: capital,
@@ -115,9 +120,20 @@ export default function AdminAiFundDashboard({ userId }) {
         min_signal_confidence: riskPreset === 'conservative' ? 0.85 : riskPreset === 'neutral' ? 0.75 : 0.65,
         daily_mdd_limit_pct: riskPreset === 'conservative' ? -1.0 : riskPreset === 'neutral' ? -2.0 : -4.0,
         is_active: nextActive,
-      })
+      }
+      if (configId) {
+        payload.id = configId
+      }
+
+      const { data, error } = await supabase
+        .from('admin_ai_fund_configs')
+        .upsert(payload, { onConflict: 'user_id,exchange_type' })
+        .select()
 
       if (error) throw error
+      if (data && data.length > 0 && data[0].id) {
+        setConfigId(data[0].id)
+      }
       setIsActive(nextActive)
       setMessage(nextActive ? '✅ AI 위탁 운용이 시작되었습니다.' : '⏸ AI 위탁 운용이 일시정지되었습니다.')
     } catch (err) {
@@ -126,6 +142,7 @@ export default function AdminAiFundDashboard({ userId }) {
       setLoading(false)
     }
   }
+
 
   const handleEmergencyKillSwitch = async () => {
     if (!confirm('🚨 긴급 셧다운을 실행하시겠습니까? 모든 AI 자동 매매가 즉시 정지됩니다.')) return

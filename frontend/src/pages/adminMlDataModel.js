@@ -124,6 +124,13 @@ export const automationPresets = [
     isNew: true,
   },
   {
+    key: 'crypto-v11-full',
+    label: '코인 v11 자동 수집+학습 (248종목 4h) [테스트]',
+    summary: '30m→4h 타임프레임 전환 + BTC 하락 차단 룰 + Stop-Loss -3% 탑재. 결과 확인 후 v10 대체 예정.',
+    version: 'v11',
+    isNew: true,
+  },
+  {
     key: 'kr-stock-v1-full',
     label: '국내주식 v1 자동 수집+학습',
     summary: 'KOSPI200/KOSDAQ150 거래대금 50억↑ 동적 스크리닝 및 가변 슬리피지 검증을 포함한 DART 연동 국내주식 모델',

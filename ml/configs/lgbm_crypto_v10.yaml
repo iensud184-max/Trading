@@ -1,5 +1,5 @@
 data:
-  raw_candles_path: data/raw/crypto_candles_30m.csv
+  raw_candles_path: data/raw/crypto_candles_4h.csv
   features_path: data/processed/crypto_features_lgbm_v10.csv
   predictions_path: data/processed/crypto_predictions_lgbm_v10.csv
   backtest_up_only_summary_path: data/processed/crypto_backtest_up_only_v10.json
@@ -11,11 +11,12 @@ model:
   asset_type: CRYPTO
   output_path: models/lgbm_crypto_signal_v10.joblib
   horizon_periods: 6
-  up_return_threshold: 0.01
-  risk_return_threshold: -0.015
+  up_return_threshold: 0.03
+  risk_return_threshold: -0.03
   validation_ratio: 0.2
   random_state: 42
   target_column: residual_up_label
+  min_listing_days: 730
   feature_columns:
   - return_1
   - return_3
@@ -96,12 +97,16 @@ model:
   - market_news_burst_zscore
   - market_news_presence_flag
   - market_news_stress_score
+  - btc_trend_filter
+  - btc_volatility_4
+  - btc_ma_20_gap
 prediction:
   risk_model_path: models/lgbm_crypto_risk_v10.joblib
-  long_threshold: 0.25
+  long_threshold: 0.30
   short_threshold: 0.72
+  min_composite_spread: 0.05
 labels:
-  neutral_zone_abs_return: 0.002
+  neutral_zone_abs_return: 0.005
   drop_neutral_samples: true
   use_residual_label: true
   residual_market_symbol: BTCUSDT
@@ -119,15 +124,17 @@ backtest:
   top_n: 1
   fee_bps: 6
   slippage_bps: 10
+  stop_loss_pct: -0.03
+  btc_trend_filter_enabled: true
 lightgbm:
   verbose: -1
   verbosity: -1
-  n_estimators: 222
-  learning_rate: 0.028911196064224185
-  num_leaves: 83
-  max_depth: 8
-  min_child_samples: 76
-  subsample: 0.6772305854007946
-  colsample_bytree: 0.6024156788945187
-  reg_alpha: 1.504186616846756e-08
-  reg_lambda: 0.020753682767037214
+  n_estimators: 210
+  learning_rate: 0.009461189730985807
+  num_leaves: 49
+  max_depth: 4
+  min_child_samples: 92
+  subsample: 0.868049976756145
+  colsample_bytree: 0.6374351556379934
+  reg_alpha: 2.593534848074862
+  reg_lambda: 1.5037404170756398e-05

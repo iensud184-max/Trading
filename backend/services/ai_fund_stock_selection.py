@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from backend.services.ml_model_service import build_active_signal_payload
+from backend.services.ml_release_service import MlReleaseService
 
 
 _MARKET_MODEL_KEYS = {
@@ -28,6 +30,18 @@ def _as_bool(value: Any) -> bool:
 
 class AiFundStockSelectionService:
     """국내·미국 활성 ML 신호를 주문 가능한 주식 후보로 정리한다."""
+
+    def __init__(
+        self,
+        release_service: MlReleaseService | None = None,
+        require_release: bool | None = None,
+    ):
+        self.release_service = release_service or MlReleaseService()
+        self.require_release = (
+            require_release
+            if require_release is not None
+            else os.getenv("ML_RELEASE_REQUIRED", "false").strip().lower() == "true"
+        )
 
     def select_candidates(
         self,
@@ -56,6 +70,9 @@ class AiFundStockSelectionService:
             ]
             for market in markets
         }
+        for market in markets:
+            if not self._is_market_release_ready(market):
+                candidates_by_market[market] = []
         for candidates in candidates_by_market.values():
             candidates.sort(key=lambda candidate: candidate["confidence_score"], reverse=True)
 
@@ -108,6 +125,17 @@ class AiFundStockSelectionService:
         markets = [market for market in ("KR", "US") if scope in {"ALL", market}]
         availability: dict[str, dict] = {}
         for market in markets:
+            release_ready, release_status = self._market_release_status(market)
+            if not release_ready:
+                availability[market] = {
+                    "status": release_status,
+                    "message": self._release_status_message(release_status),
+                    "total_count": 0,
+                    "long_count": 0,
+                    "blocked_count": 0,
+                    "market_regimes": [],
+                }
+                continue
             rows = self._load_market_predictions(market, auth_header)
             total_count = len(rows)
             long_count = sum(str(row.get("position") or "").upper() == "LONG" for row in rows)
@@ -130,6 +158,23 @@ class AiFundStockSelectionService:
                 "market_regimes": regimes,
             }
         return availability
+
+    def _is_market_release_ready(self, market: str) -> bool:
+        return self._market_release_status(market)[0]
+
+    def _market_release_status(self, market: str) -> tuple[bool, str]:
+        if not self.require_release:
+            return True, "READY"
+        return self.release_service.is_asset_fresh(_MARKET_MODEL_KEYS[market])
+
+    @staticmethod
+    def _release_status_message(status: str) -> str:
+        messages = {
+            "RELEASE_UNAVAILABLE": "검증된 ML 릴리스를 찾지 못해 신규 매수를 보류했습니다.",
+            "STALE_RELEASE": "최신 ML 릴리스 시간이 지나 신규 매수를 보류했습니다.",
+            "RELEASE_INVALID": "ML 릴리스 정보가 올바르지 않아 신규 매수를 보류했습니다.",
+        }
+        return messages.get(status, "ML 릴리스를 확인하지 못해 신규 매수를 보류했습니다.")
 
     def _eligible(self, row: dict, held_symbols: set[str], config: dict) -> bool:
         symbol = str(row.get("symbol") or "").upper()

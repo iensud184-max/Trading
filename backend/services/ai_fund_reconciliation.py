@@ -11,7 +11,7 @@ from backend.services.ai_fund_ledger import AiFundLedger
 from backend.services.supabase_client import safe_query_supabase_as_service_role
 
 
-OPEN_ORDER_STATUSES = "PENDING_SUBMIT,SUBMITTED,PARTIALLY_FILLED,CANCEL_REQUESTED"
+OPEN_ORDER_STATUSES = "PENDING_SUBMIT,SUBMITTED,PARTIALLY_FILLED,CANCEL_REQUESTED,NEEDS_REVIEW"
 
 
 @dataclass(frozen=True)
@@ -40,14 +40,20 @@ class AiFundReconciliationService:
         updated_count = 0
         needs_review_count = 0
         for row in orders:
-            outcome = self._reconcile_order(exchange_type, row, exchange_client)
+            outcome = self._reconcile_order(config, exchange_type, row, exchange_client)
             if outcome == "UPDATED":
                 updated_count += 1
             elif outcome == "NEEDS_REVIEW":
                 needs_review_count += 1
         return ReconciliationResult(updated_count=updated_count, needs_review_count=needs_review_count)
 
-    def _reconcile_order(self, exchange_type: str, row: dict[str, Any], exchange_client: Any) -> str:
+    def _reconcile_order(
+        self,
+        config: dict[str, Any],
+        exchange_type: str,
+        row: dict[str, Any],
+        exchange_client: Any,
+    ) -> str:
         exchange_order_id = row.get("exchange_order_id")
         if not exchange_order_id:
             self._mark_needs_review(row["id"], "거래소 주문 식별자가 없습니다.")
@@ -84,8 +90,39 @@ class AiFundReconciliationService:
             },
         )
         if order.filled_qty > 0:
-            self.ledger.apply_new_fill(order, order_id=str(row["id"]))
+            new_fill_quantity = self.ledger.apply_new_fill(order, order_id=str(row["id"]))
+            if new_fill_quantity > 0:
+                self._record_trade_execution(config, row, order, new_fill_quantity)
         return "UPDATED"
+
+    def _record_trade_execution(
+        self,
+        config: dict[str, Any],
+        row: dict[str, Any],
+        order: Any,
+        new_fill_quantity: float,
+    ) -> None:
+        raw_response = row.get("raw_response") if isinstance(row.get("raw_response"), dict) else {}
+        confidence_score = _to_optional_float(raw_response.get("confidence_score")) or 0.0
+        executed_price = float(order.average_fill_price or 0.0)
+        if executed_price <= 0:
+            return
+        self._query(
+            "admin_ai_trade_logs",
+            method="POST",
+            json_data={
+                "user_id": config["user_id"],
+                "exchange_type": str(config.get("exchange_type") or "").lower(),
+                "symbol": order.symbol,
+                "side": order.side,
+                "confidence_score": confidence_score,
+                "executed_price": executed_price,
+                "executed_qty": new_fill_quantity,
+                "total_amount": executed_price * new_fill_quantity,
+                "order_id": order.exchange_order_id or row.get("exchange_order_id"),
+                "status": "SUCCESS",
+            },
+        )
 
     @staticmethod
     def _get_order_status(exchange_client: Any, order_id: str, symbol: str) -> dict[str, Any] | None:

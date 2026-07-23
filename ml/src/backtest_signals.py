@@ -93,6 +93,8 @@ def build_daily_backtest(
     funding_bps_per_horizon: float = 0.0,
     selection_policy: dict | None = None,
     volumes_cache: dict[str, float] | None = None,
+    stop_loss_pct: float | None = None,
+    btc_trend_filter_enabled: bool = False,
 ) -> tuple[pd.DataFrame, dict]:
     daily_rows = []
     selection_rows = []
@@ -123,6 +125,25 @@ def build_daily_backtest(
         else:
             selected = ranked.head(min(top_n, len(ranked))).copy()
         if selected.empty:
+            universe_avg_return = float(universe_group["future_return"].mean()) if not universe_group.empty else 0.0
+            net_universe_avg_return = universe_avg_return - universe_cost_rate
+            daily_rows.append(
+                {
+                    "date": date,
+                    "selected_symbols": "",
+                    "selected_count": 0,
+                    "top_avg_future_return": 0.0,
+                    "top_avg_future_return_net": 0.0,
+                    "universe_avg_future_return": universe_avg_return,
+                    "universe_avg_future_return_net": net_universe_avg_return,
+                    "excess_return": -universe_avg_return,
+                    "excess_return_net": -net_universe_avg_return,
+                    "avg_signal_score": 0.0,
+                    "avg_up_probability": 0.0,
+                    "avg_risk_probability": 0.0,
+                    "precision_at_top_n": 0.0,
+                }
+            )
             continue
 
         actual_returns = []
@@ -130,8 +151,33 @@ def build_daily_backtest(
         net_returns = []
         for idx, row in selected.iterrows():
             pos = row.get("position", "LONG")
+
+            # BTC 하드 필터: BTC 하락 중이면 LONG 강제 HOLD (v11+)
+            if btc_trend_filter_enabled and pos == "LONG":
+                btc_filter = row.get("btc_trend_filter", 0.0)
+                if pd.notna(btc_filter) and float(btc_filter) >= 1.0:
+                    pos = "HOLD"
+
+            if pos == "HOLD":
+                actual_returns.append(0.0)
+                net_returns.append(0.0)
+                is_positives.append(0)
+                continue
+
             ret = row["future_return"]
-            
+
+            # stop-loss 시뮬: horizon 기간 내 최저 수익률이 stop_loss_pct 이하이면 강제 청산 (v11+)
+            # LONG 기준: 중간에 -N% 터치하면 future_return 대신 stop_loss_pct 사용
+            # SHORT 기준: 중간에 +N% 터치하면 short profit = stop_loss_pct (절댓값 반전)
+            if stop_loss_pct is not None and "min_future_return" in row.index:
+                min_ret = row.get("min_future_return")
+                if pd.notna(min_ret):
+                    if pos == "LONG" and float(min_ret) <= stop_loss_pct:
+                        ret = stop_loss_pct
+                    elif pos == "SHORT" and float(min_ret) >= -stop_loss_pct:
+                        # 숏 포지션: 가격이 +|stop_loss_pct| 이상 오르면 손절
+                        ret = stop_loss_pct
+
             # 개별 종목 가변 슬리피지 연산
             symbol_upper = str(row["symbol"]).upper()
             median_vol = volumes.get(symbol_upper, 0.0)
@@ -347,14 +393,17 @@ def main() -> None:
         valid_df["risk_model_version"] = risk_payload["config"]["model"]["version"]
         
         if asset_type == "CRYPTO":
+            min_composite_spread = float(prediction_config.get("min_composite_spread", 0.0))
             positions = []
             scores = []
+            valid_df["composite_spread"] = valid_df["up_probability"] - valid_df["risk_probability"]
             for _, row in valid_df.iterrows():
                 up_p = row["up_probability"]
                 risk_p = row["risk_probability"]
-                if risk_p < long_threshold:
+                spread = row["composite_spread"]
+                if risk_p < long_threshold and spread >= min_composite_spread:
                     positions.append("LONG")
-                    scores.append(up_p * 100)
+                    scores.append(spread * 100)
                 elif risk_p > short_threshold:
                     positions.append("SHORT")
                     scores.append(risk_p * 100)
@@ -363,7 +412,6 @@ def main() -> None:
                     scores.append(0.0)
             valid_df["position"] = positions
             valid_df["signal_score"] = scores
-            valid_df["composite_spread"] = valid_df["up_probability"] - valid_df["risk_probability"]
             valid_df["scoring_strategy"] = "composite"
         else:
             valid_df = apply_stock_policy_frame(valid_df, prediction_config)
@@ -401,6 +449,11 @@ def main() -> None:
     if args.top_percent is not None:
         top_n = max(1, int(math.ceil(valid_df["symbol"].nunique() * float(args.top_percent))))
 
+    # v11+: stop-loss / BTC trend filter config 읽기
+    stop_loss_pct_raw = backtest_config.get("stop_loss_pct")
+    stop_loss_pct = float(stop_loss_pct_raw) if stop_loss_pct_raw is not None else None
+    btc_trend_filter_enabled = bool(backtest_config.get("btc_trend_filter_enabled", False))
+
     selection_policy = config.get("prediction", {}).get("selection_policy", {})
     volumes_cache = load_median_dollar_volumes(args.config)
     daily_df, summary = build_daily_backtest(
@@ -410,7 +463,9 @@ def main() -> None:
         slippage_bps,
         funding_bps_per_horizon,
         selection_policy,
-        volumes_cache=volumes_cache
+        volumes_cache=volumes_cache,
+        stop_loss_pct=stop_loss_pct,
+        btc_trend_filter_enabled=btc_trend_filter_enabled,
     )
     summary.update(
         {

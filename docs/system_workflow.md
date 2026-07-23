@@ -271,6 +271,10 @@ sequenceDiagram
 
 현재 Toss/KIS OAuth 토큰은 로컬 파일보다 Supabase `token_caches`를 우선 사용하는 구조입니다.
 
+### 로컬 ML 릴리스와 AWS 주문 분리
+
+AI 위탁의 모델 학습·예측·릴리스 배포는 로컬 ML 런처가 담당하고, AWS `backend-worker`는 주문·보호 매도·대사만 담당합니다. AWS 신규 매수는 `ML_RELEASE_REQUIRED=true`일 때 검증된 현재 릴리스와 코인 원본 데이터 시각(`prediction_data_at`, 90분 이내)을 모두 만족해야 합니다. `AI_FUND_EXECUTION_ENABLED=true`는 AWS 실행 노드에만 설정하며, `AI_FUND_TRADING_ENABLED`가 별도로 true여야 주문 스케줄러가 시작됩니다.
+
 1. API 호출 전 `token_cache_service` 조회
 2. 유효 토큰이 있으면 복호화해서 사용
 3. 없거나 만료되었으면 거래소에서 재발급
@@ -327,4 +331,3 @@ sequenceDiagram
   - **중립적**: 목표익절 **+5.0%** / 손절 **-2.0%** / 최소 확신도 **75%** / 1회 투입 **10%**
   - **공격적**: 목표익절 **+8.0%** / 손절 **-4.0%** / 최소 확신도 **65%** / 1회 투입 **20%**
 - **실시간 탐색 펄스 타이머**: UI에서 5초 간격으로 `lastCheckTime` 스캔 펄스를 실시간 업뎃하여 운용 상태를 시각화합니다.
-

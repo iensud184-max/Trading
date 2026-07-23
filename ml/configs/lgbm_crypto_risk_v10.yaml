@@ -1,5 +1,5 @@
 data:
-  raw_candles_path: data/raw/crypto_candles_30m.csv
+  raw_candles_path: data/raw/crypto_candles_4h.csv
   features_path: data/processed/crypto_features_lgbm_v10.csv
 
 model:
@@ -7,11 +7,12 @@ model:
   asset_type: CRYPTO
   output_path: models/lgbm_crypto_risk_v10.joblib
   horizon_periods: 6
-  up_return_threshold: 0.01
-  risk_return_threshold: -0.015
+  up_return_threshold: 0.03
+  risk_return_threshold: -0.03
   validation_ratio: 0.2
   random_state: 42
   target_column: residual_risk_label
+  min_listing_days: 730
   feature_columns:
     - return_1
     - return_3
@@ -92,9 +93,12 @@ model:
     - market_news_burst_zscore
     - market_news_presence_flag
     - market_news_stress_score
+    - btc_trend_filter
+    - btc_volatility_4
+    - btc_ma_20_gap
 
 labels:
-  neutral_zone_abs_return: 0.002
+  neutral_zone_abs_return: 0.005
   drop_neutral_samples: true
   use_residual_label: true
   residual_market_symbol: BTCUSDT
@@ -112,7 +116,7 @@ lightgbm:
   verbosity: -1
   objective: binary
   learning_rate: 0.018
-  n_estimators: 900
+  n_estimators: 500
   num_leaves: 40
   max_depth: -1
   subsample: 0.82
@@ -120,4 +124,3 @@ lightgbm:
   min_child_samples: 45
   reg_alpha: 0.2
   reg_lambda: 1.2
-

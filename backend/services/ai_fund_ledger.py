@@ -111,6 +111,7 @@ class AiFundLedger:
                 "price": order.average_fill_price,
                 "fee_amount": order.fee,
             },
+            extra_headers={"Prefer": "return=representation"},
         )
         if not fill_rows:
             return 0.0

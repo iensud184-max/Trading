@@ -1,6 +1,28 @@
 from backend.services.ai_fund_stock_selection import AiFundStockSelectionService
 
 
+class _UnavailableReleaseService:
+    def is_asset_fresh(self, _asset_key):
+        return False, "RELEASE_UNAVAILABLE"
+
+
+def test_stock_candidates_are_withheld_when_current_release_is_required():
+    service = AiFundStockSelectionService(
+        release_service=_UnavailableReleaseService(),
+        require_release=True,
+    )
+
+    result = service.select_candidates(
+        {"asset_scope": "ALL", "max_open_positions": 3, "min_signal_confidence": 0.3},
+        held_symbols=set(),
+    )
+    availability = service.get_availability({"asset_scope": "ALL"})
+
+    assert result == []
+    assert availability["KR"]["status"] == "RELEASE_UNAVAILABLE"
+    assert availability["US"]["status"] == "RELEASE_UNAVAILABLE"
+
+
 def test_select_candidates_uses_market_scope_and_excludes_held_symbols(monkeypatch):
     service = AiFundStockSelectionService()
     monkeypatch.setattr(

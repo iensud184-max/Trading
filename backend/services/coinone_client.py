@@ -394,10 +394,24 @@ class CoinoneClient:
             payload["target_currency"] = target_currency
 
         data = self._private_post("/v2.1/order/detail", payload)
-        status = str(data.get("status") or data.get("order_status") or "UNKNOWN").upper()
+        order = data.get("order") if isinstance(data.get("order"), dict) else {}
+        status = str(
+            order.get("status")
+            or data.get("status")
+            or data.get("order_status")
+            or "UNKNOWN"
+        ).upper()
         return {
-            "order_id": order_id,
+            "order_id": order.get("order_id") or data.get("order_id") or order_id,
             "status": status,
+            "executed_qty": order.get("executed_qty") or data.get("executed_qty"),
+            "average_fill_price": (
+                order.get("average_executed_price")
+                or order.get("average_fill_price")
+                or data.get("average_executed_price")
+                or data.get("average_fill_price")
+            ),
+            "fee": order.get("fee") or data.get("fee"),
             "raw": data,
         }
 

@@ -171,15 +171,28 @@
     "asset_type": "CRYPTO",
     "model_version": "lgbm_crypto_signal_v10",
     "created_at": "2026-07-22T07:09:17.413820+00:00",
-    "updated_at": "2026-07-22T07:36:17.873872+00:00",
+    "updated_at": "2026-07-23T02:05:36.160561+00:00",
     "is_latest": true,
-    "is_recommended": true,
-    "is_serving": true,
+    "is_recommended": false,
+    "is_serving": false,
     "approved_by": "d4efb544-2a8a-443d-994d-9e7077eddbe7",
     "approved_at": "2026-07-22T07:09:17.413717+00:00",
     "model_path": "/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/ml/models/lgbm_crypto_signal_v10.joblib",
     "metrics_path": "/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/ml/models/lgbm_crypto_signal_v10.metrics.json",
     "summary_path": "/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/ml/data/processed/crypto_v10_summary.json",
-    "recommendation_reason": "v10 coin auto collection+training version (248 symbols 30m) promoted to active serving"
+    "recommendation_reason": "file-based score comparison"
+  },
+  {
+    "asset_type": "CRYPTO",
+    "model_version": "lgbm_crypto_signal_v11",
+    "created_at": "2026-07-23T02:37:52.625253+00:00",
+    "updated_at": "2026-07-23T02:46:26.378807+00:00",
+    "model_path": "/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/ml/models/lgbm_crypto_signal_v11.joblib",
+    "metrics_path": "/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/ml/models/lgbm_crypto_signal_v11.metrics.json",
+    "summary_path": "/Users/kangheesung/10-19_개발/13_프로젝트/13.05_트레이딩/teamproject/ml/data/processed/crypto_v11_summary.json",
+    "recommendation_reason": "file-based score comparison",
+    "is_latest": true,
+    "is_recommended": false,
+    "is_serving": false
   }
 ]

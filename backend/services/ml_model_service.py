@@ -18,6 +18,7 @@ from backend.utils.file_helpers import (
 from backend.services.supabase_client import query_supabase, safe_query_supabase
 from backend.services.auth_service import get_user_id_from_header
 from backend.services.ml_registry_service import list_model_registry
+from backend.services.ml_release_service import MlReleaseService
 from backend.services.symbol_metadata import enrich_symbol
 
 PROJECT_ROOT = Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -1241,6 +1242,13 @@ def build_active_signal_payload(
 
     active_result = selection["active_result"]
     predictions_path = Path(str(active_result.get("predictions_path") or ""))
+    if os.getenv("ML_RELEASE_REQUIRED", "false").strip().lower() == "true":
+        release_service = MlReleaseService()
+        is_fresh, _status = release_service.is_asset_fresh(asset_key)
+        release_predictions_path = release_service.get_current_predictions_path(asset_key)
+        if not is_fresh or release_predictions_path is None:
+            return None
+        predictions_path = release_predictions_path
     if not predictions_path.exists():
         return None
 

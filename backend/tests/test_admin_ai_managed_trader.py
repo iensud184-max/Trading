@@ -242,6 +242,13 @@ def test_is_symbol_tradable_on_exchange():
         assert trader.is_symbol_tradable_on_exchange("UNLISTEDUSDT") is False
 
 
+def test_coinone_symbol_check_blocks_orders_when_market_list_is_unavailable():
+    trader = AdminAiManagedTrader(user_id="00000000-0000-0000-0000-000000000123", exchange_type="coinone")
+
+    with patch("backend.services.coinone_client.CoinoneClient.get_krw_markets", return_value=[]):
+        assert trader.is_symbol_tradable_on_exchange("MKRUSDT") is False
+
+
 def test_exchange_timeout_marks_order_needs_review_without_success_log():
     trader = AdminAiManagedTrader(user_id="admin-123", exchange_type="coinone")
     trader._get_fund_config = MagicMock(return_value=active_config(operation_mode="LIVE"))
@@ -271,6 +278,30 @@ def test_exchange_timeout_marks_order_needs_review_without_success_log():
         status="NEEDS_REVIEW",
         failure_reason="timeout",
     )
+
+
+def test_unresolved_buy_order_blocks_a_second_buy_submission():
+    trader = AdminAiManagedTrader(user_id="admin-123", exchange_type="coinone")
+    trader._get_fund_config = MagicMock(return_value=active_config(operation_mode="LIVE"))
+    trader._get_daily_pnl_pct = MagicMock(return_value=0.0)
+    trader._get_open_position = MagicMock(return_value=None)
+    trader.is_symbol_tradable_on_exchange = MagicMock(return_value=True)
+    trader._find_unresolved_order_for_symbol = MagicMock(
+        return_value={"id": "review-order-1", "status": "NEEDS_REVIEW"}
+    )
+    exchange_client = MagicMock()
+
+    with patch("backend.services.admin_ai_managed_trader.distributed_lock", acquired_lock):
+        result = trader.evaluate_and_execute_signal(
+            symbol="BTT",
+            signal_type="BUY",
+            confidence_score=0.9,
+            current_price=0.0004,
+            exchange_client=exchange_client,
+        )
+
+    assert result == {"order_id": "review-order-1", "status": "NEEDS_REVIEW", "blocked": True}
+    exchange_client.place_order.assert_not_called()
 
 
 def test_canary_mode_limits_order_amount(monkeypatch):

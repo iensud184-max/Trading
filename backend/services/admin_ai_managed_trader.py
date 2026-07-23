@@ -80,6 +80,19 @@ class AdminAiManagedTrader:
             if side_upper == "BUY" and open_position:
                 logger.info(f"[AdminAiTrader] Existing open position found for {symbol}; skipping duplicate BUY")
                 return None
+            if side_upper == "BUY":
+                unresolved_order = self._find_unresolved_order_for_symbol(symbol, normalized_strategy_id)
+                if unresolved_order:
+                    logger.warning(
+                        "[AdminAiTrader] Unresolved BUY order found for %s; blocking another submission (order=%s)",
+                        symbol,
+                        unresolved_order.get("id"),
+                    )
+                    return {
+                        "order_id": unresolved_order.get("id"),
+                        "status": unresolved_order.get("status"),
+                        "blocked": True,
+                    }
 
             max_pos_size = float(config.get("max_position_size", 0.0))
             if max_pos_size <= 0:
@@ -327,6 +340,26 @@ class AdminAiManagedTrader:
         ) or []
         return rows[0] if isinstance(rows, list) and rows else None
 
+    def _find_unresolved_order_for_symbol(
+        self,
+        symbol: str,
+        strategy_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        rows = safe_query_supabase_as_service_role(
+            "ai_fund_orders",
+            params={
+                "user_id": f"eq.{self.user_id}",
+                "exchange_type": f"eq.{self.exchange_type}",
+                "strategy_id": f"eq.{strategy_id}",
+                "symbol": f"eq.{symbol.upper()}",
+                "side": "eq.BUY",
+                "status": "in.(PENDING_SUBMIT,SUBMITTED,PARTIALLY_FILLED,CANCEL_REQUESTED,NEEDS_REVIEW)",
+                "order": "created_at.desc",
+                "limit": "1",
+            },
+        ) or []
+        return rows[0] if isinstance(rows, list) and rows else None
+
     def _create_pending_order(
         self,
         config: Dict[str, Any],
@@ -547,7 +580,8 @@ class AdminAiManagedTrader:
         if self.exchange_type == "coinone":
             from backend.services.coinone_client import CoinoneClient
             markets = CoinoneClient.get_krw_markets()
-            if markets:
-                target_currencies = {m.get("target_currency", "").upper() for m in markets}
-                return clean_target in target_currencies
+            if not markets:
+                return False
+            target_currencies = {m.get("target_currency", "").upper() for m in markets}
+            return clean_target in target_currencies
         return True

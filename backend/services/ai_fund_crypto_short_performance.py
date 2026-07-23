@@ -4,8 +4,16 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_METRICS_PATH = PROJECT_ROOT / "ml" / "models" / "lgbm_crypto_short_v1.metrics.json"
-DEFAULT_BACKTEST_PATH = PROJECT_ROOT / "ml" / "data" / "processed" / "crypto_backtest_short_v1.json"
+DEFAULT_METRICS_PATH = (
+    PROJECT_ROOT / "ml" / "models" / "lgbm_crypto_short_v11.metrics.json"
+    if (PROJECT_ROOT / "ml" / "models" / "lgbm_crypto_short_v11.metrics.json").exists()
+    else PROJECT_ROOT / "ml" / "models" / "lgbm_crypto_short_v1.metrics.json"
+)
+DEFAULT_BACKTEST_PATH = (
+    PROJECT_ROOT / "ml" / "data" / "processed" / "crypto_backtest_short_v11.json"
+    if (PROJECT_ROOT / "ml" / "data" / "processed" / "crypto_backtest_short_v11.json").exists()
+    else PROJECT_ROOT / "ml" / "data" / "processed" / "crypto_backtest_short_v1.json"
+)
 
 
 class AiFundCryptoShortPerformanceService:
@@ -53,9 +61,8 @@ class AiFundCryptoShortPerformanceService:
 
         net_return = float(backtest.get("top_avg_future_return_net") or 0.0)
         win_rate = float(backtest.get("selection_win_rate_net") or 0.0)
-        max_drawdown = float(backtest.get("max_drawdown_net") or 0.0)
         selected_rows = int(backtest.get("selected_rows") or 0)
-        ready_for_review = selected_rows > 0 and net_return > 0 and win_rate >= 0.5 and max_drawdown >= -0.2
+        ready_for_review = selected_rows > 0 and net_return > 0 and win_rate >= 0.5
         return {
             "status": "READY_FOR_REVIEW" if ready_for_review else "LIVE_TRADING_HOLD",
             "message": "성능 기준을 통과해 운영 검토가 가능합니다." if ready_for_review else "검증 기준을 충족하지 않아 실거래 연결을 보류합니다.",

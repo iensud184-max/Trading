@@ -35,6 +35,37 @@ def test_apply_new_buy_fill_updates_position_and_sellable_quantity(monkeypatch):
     assert position_write[2]["average_entry_price"] == 100.0
 
 
+def test_apply_new_fill_requests_insert_representation_before_updating_position(monkeypatch):
+    fill_insert_headers = []
+
+    def fake_query(endpoint, method="GET", json_data=None, params=None, extra_headers=None, **_kwargs):
+        if endpoint == "ai_fund_positions" and method == "GET":
+            return []
+        if endpoint == "ai_fund_fills" and method == "GET":
+            return []
+        if endpoint == "ai_fund_fills" and method == "POST":
+            fill_insert_headers.append(extra_headers)
+            return [json_data]
+        return [json_data] if json_data else []
+
+    monkeypatch.setattr("backend.services.ai_fund_ledger.safe_query_supabase_as_service_role", fake_query)
+    ledger = AiFundLedger("user-1", "coinone")
+    order = ExchangeOrder(
+        exchange_order_id="exchange-1",
+        client_order_id="client-1",
+        symbol="BTC",
+        side="BUY",
+        requested_qty=1.0,
+        filled_qty=0.4,
+        average_fill_price=100.0,
+        status="PARTIALLY_FILLED",
+        fee=1.0,
+    )
+
+    assert ledger.apply_new_fill(order, order_id="ledger-order-1") == 0.4
+    assert fill_insert_headers == [{"Prefer": "return=representation"}]
+
+
 def test_sellable_quantity_subtracts_open_sell_reservations(monkeypatch):
     monkeypatch.setattr(
         "backend.services.ai_fund_ledger.safe_query_supabase_as_service_role",

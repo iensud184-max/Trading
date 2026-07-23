@@ -979,6 +979,7 @@ erDiagram
     *   `created_at`, `updated_at` (TIMESTAMPTZ)
 *   **제약조건**: `UNIQUE(user_id, exchange_type)`
 *   **RLS**: 본인 설정 CRUD 및 백그라운드 워커(`service_role`) 전체 관리가 허용됩니다.
+*   **ML 릴리스 저장 위치**: 학습 모델, 예측 CSV, SHA-256 무결성 정보와 `prediction_data_at`은 현재 Supabase 테이블이 아닌 `ml/releases` 파일 시스템의 `manifest.json`에 저장됩니다. `admin_ai_fund_configs`에는 운용 정책만 저장하며, 릴리스 검증은 AWS API·워커가 읽기 전용 마운트에서 수행합니다.
 
 ### 2.26 admin_ai_trade_logs
 *   **용도**: AI 자율 운용 엔진 및 리스크 제어에 의해 체결된 매매 주문 이력 및 체결 상태를 저장합니다.

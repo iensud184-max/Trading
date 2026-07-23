@@ -56,5 +56,6 @@ qa-artifacts/
 docker-compose.local.yml
 nginx.conf
 Dockerfile
+frontend/.env.docker
 # Docker Local Overrides
 docker-compose.override.yml

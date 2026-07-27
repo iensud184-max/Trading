@@ -74,4 +74,10 @@ else
   echo "[3/3] Docker 이미지 재빌드 및 backend-api 재시작 (worker 유지)"
   ssh "${SSH_OPTS[@]}" "$AWS_HOST" \
     "cd ${REMOTE_DIR} && docker compose up -d --build backend-api && docker compose ps"
+  echo "[안내] 워커 프로세스도 함께 재시작하려면 DEPLOY_WORKER=true ./scripts/deploy_backend_aws.sh 실행"
 fi
+
+echo ""
+echo "[안내] 로컬에서 생성된 ML 예측 릴리스를 AWS로 배포하려면 다음 명령어를 실행하세요:"
+echo "       ./scripts/deploy_ml_release_aws.sh ml/local_releases/releases/<asset>/<release-id>"
+

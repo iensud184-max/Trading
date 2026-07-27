@@ -8,10 +8,12 @@ const RouteTracker = () => {
 
   // 1. GA4 초기화 (최초 1회 실행)
   useEffect(() => {
-    // VITE
     const gaId = import.meta.env.VITE_GA_TRACKING_ID;
     
-    if (gaId) {
+    // 개발 모드(npm run dev)이거나 localhost 환경일 경우 GA 수집 제외
+    const isDev = import.meta.env.DEV || window.location.hostname === "localhost";
+
+    if (gaId && !isDev) {
       ReactGA.initialize(gaId);
       setInitialized(true);
     }

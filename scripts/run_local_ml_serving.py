@@ -81,12 +81,12 @@ def refresh_crypto_candles(config_path: Path) -> None:
         symbols,
         "30m",
         240,
-        sleep_seconds=0.15,
-        retry=2,
-        retry_wait_seconds=5.0,
+        sleep_seconds=0.1,
+        retry=5,
+        retry_wait_seconds=2.0,
     )
     successful_symbols = len({str(row.get("symbol") or "") for row in rows})
-    if successful_symbols < max(1, int(len(symbols) * 0.8)):
+    if successful_symbols < max(1, int(len(symbols) * 0.5)):
         raise RuntimeError(f"코인 캔들 수집 성공률이 낮습니다: {successful_symbols}/{len(symbols)}, failures={len(failures)}")
     raw_path = resolve_config_path(config_path, str(data_config["raw_candles_path"]))
     write_rows(raw_path, rows, append=True)

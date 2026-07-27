@@ -709,10 +709,17 @@ def start_ml_automation_scheduler(ml_automation_enabled: bool, supabase_service_
                                                         if latest_tr_job:
                                                             sync_training_job_to_supabase(auth_header, latest_tr_job)
                                                         sync_model_registry_to_supabase(auth_header, training_config.get("summary_output"))
+                                                        stock_model_ver = resolve_model_version_from_config(training_config["config"])
+                                                        if result.get("success") and stock_model_ver:
+                                                            try:
+                                                                from backend.services.ml_registry_service import set_serving_model
+                                                                set_serving_model(dataset_config["asset_type"], stock_model_ver, approved_by="auto-scheduler")
+                                                            except Exception as e:
+                                                                logger.warning(f"Failed to auto promote serving stock model {stock_model_ver}: {e}")
                                                         record_model_audit_jobs(
                                                             auth_header,
                                                             dataset_config["asset_type"],
-                                                            resolve_model_version_from_config(training_config["config"]),
+                                                            stock_model_ver,
                                                         )
 
                                                     except Exception as e:

@@ -12,7 +12,7 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RELEASES_ROOT = Path(os.getenv("ML_RELEASES_ROOT", PROJECT_ROOT / "ml" / "releases"))
-CRYPTO_MAX_AGE = timedelta(minutes=90)
+CRYPTO_MAX_AGE = timedelta(hours=12)
 STOCK_MAX_AGE = timedelta(hours=36)
 
 

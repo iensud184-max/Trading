@@ -51,7 +51,7 @@ def test_crypto_candidates_use_current_release_predictions_when_release_is_requi
 
 
 def test_crypto_candidates_are_withheld_when_current_release_is_stale(tmp_path):
-    _write_crypto_release(tmp_path, created_at=datetime.now(timezone.utc) - timedelta(minutes=91))
+    _write_crypto_release(tmp_path, created_at=datetime.now(timezone.utc) - timedelta(hours=13))
 
     snapshot = AiFundCryptoSelectionService(
         tmp_path / "fallback.csv",
@@ -107,10 +107,11 @@ def test_crypto_snapshot_explains_korean_hold_reason_when_no_long_signal_exists(
 
 def test_crypto_candidates_exclude_stale_prediction_rows_from_trade_candidates(tmp_path):
     predictions = tmp_path / "crypto_predictions.csv"
+    now = datetime.now(timezone.utc).isoformat()
     predictions.write_text(
         "exchange,symbol,position,signal_score,model_version,date\n"
         "BINANCE,BTTUSDT,LONG,99,lgbm_crypto_signal_v10,2022-01-17 03:30:00\n"
-        "BINANCE,ADAUSDT,LONG,35,lgbm_crypto_signal_v10,2026-07-23T00:45:00+00:00\n",
+        f"BINANCE,ADAUSDT,LONG,35,lgbm_crypto_signal_v10,{now}\n",
         encoding="utf-8",
     )
     service = AiFundCryptoSelectionService(predictions)

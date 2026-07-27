@@ -1,4 +1,4 @@
-const CACHE_NAME = 'antry-static-v3'
+const CACHE_NAME = 'antry-static-v4'
 
 // 앱 설치 후 빠르게 다시 열 수 있도록 정적 파일만 캐시합니다.
 const STATIC_ASSETS = [

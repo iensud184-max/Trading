@@ -53,7 +53,7 @@ def test_crypto_release_is_fresh_within_ninety_minutes(tmp_path):
     assert status == "READY"
 
 
-def test_crypto_release_is_stale_after_ninety_minutes(tmp_path):
+def test_crypto_release_is_stale_after_twelve_hours(tmp_path):
     _write_current_release(
         tmp_path,
         asset_key="crypto",
@@ -62,7 +62,7 @@ def test_crypto_release_is_stale_after_ninety_minutes(tmp_path):
 
     is_fresh, status = MlReleaseService(tmp_path).is_asset_fresh(
         "crypto",
-        datetime(2026, 7, 23, 1, 31, tzinfo=timezone.utc),
+        datetime(2026, 7, 23, 12, 1, tzinfo=timezone.utc),
     )
 
     assert is_fresh is False
@@ -73,7 +73,7 @@ def test_crypto_release_is_rejected_when_prediction_data_is_stale_even_if_releas
     _write_current_release(
         tmp_path,
         asset_key="crypto",
-        created_at="2026-07-23T01:29:00+00:00",
+        created_at="2026-07-23T11:59:00+00:00",
     )
     manifest_path = tmp_path / "current" / "crypto" / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -82,7 +82,7 @@ def test_crypto_release_is_rejected_when_prediction_data_is_stale_even_if_releas
 
     is_fresh, status = MlReleaseService(tmp_path).is_asset_fresh(
         "crypto",
-        datetime(2026, 7, 23, 1, 30, tzinfo=timezone.utc),
+        datetime(2026, 7, 23, 12, 0, tzinfo=timezone.utc),
     )
 
     assert is_fresh is False

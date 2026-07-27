@@ -1,0 +1,17 @@
+services:
+  frontend:
+    build:
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+
+  backend-api:
+    environment:
+      AUTO_TRADING_RULES_ENABLED: "false"
+      NEWS_INGEST_ENABLED: "false"
+      ML_AUTOMATION_ENABLED: "false"
+      HOME_MARKET_SNAPSHOT_ENABLED: "false"
+      MARKET_INDEX_SNAPSHOT_ENABLED: "false"
+      PORTFOLIO_SNAPSHOT_ENABLED: "false"
+      SCHEDULER_RUN_IN_GATEWAY: "false"

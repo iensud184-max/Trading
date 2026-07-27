@@ -1,0 +1,40 @@
+name: trading-local
+
+services:
+  backend-api:
+    image: kimdonghwan111/trading-backend:1.0.0
+    command: gunicorn -b 0.0.0.0:5050 -w 2 --timeout 120 --access-logfile - --error-logfile - app:app
+    env_file:
+      - ./backend/.env
+    environment:
+      ML_RELEASES_ROOT: /app/ml/releases
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  frontend:
+    image: kimdonghwan111/trading-frontend:1.0.1
+    depends_on:
+      backend-api:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+  backend-worker:
+    image: kimdonghwan111/trading-backend:1.0.0
+    command: python worker.py
+    env_file:
+      - ./backend/.env
+    environment:
+      ML_RELEASES_ROOT: /app/ml/releases
+    depends_on:
+      backend-api:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - worker

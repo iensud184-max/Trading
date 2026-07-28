@@ -225,12 +225,12 @@ backtest:
   slippage_bps: 12
   top_n: 3
 lightgbm:
-  n_estimators: 126
-  learning_rate: 0.03867985761704387
-  num_leaves: 43
+  n_estimators: 55
+  learning_rate: 0.006691118409024841
+  num_leaves: 66
   max_depth: 3
-  min_child_samples: 54
-  subsample: 0.8380624594912494
-  colsample_bytree: 0.8449873693695749
-  reg_alpha: 0.0013254139078865493
-  reg_lambda: 0.06019283361917798
+  min_child_samples: 74
+  subsample: 0.996963750073715
+  colsample_bytree: 0.6004242634758367
+  reg_alpha: 0.016143875677448162
+  reg_lambda: 0.24166366015087912

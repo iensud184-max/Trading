@@ -247,7 +247,8 @@ def build_live_stock_ranking_rows(
     toss_configured = bool(get_toss_env_credentials()["client_id"] and get_toss_env_credentials()["client_secret"])
     if allow_network and toss_configured:
         fresh_rows = [row for row in enriched_rows if is_fresh_live_quote(row)]
-        enriched_rows = fresh_rows
+        if fresh_rows:
+            enriched_rows = fresh_rows
     ranked_rows = sort_stock_rows_by_ranking(enriched_rows, ranking)[:limit]
     result = build_direct_stock_ranking_rows(ranked_rows, ranking, limit, is_foreign=is_foreign)
     for output, source in zip(result, ranked_rows):

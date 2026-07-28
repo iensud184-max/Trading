@@ -45,6 +45,7 @@ _conversation_repository = ChatbotConversationRepository()
 def list_available_tools() -> list[str]:
     return [
         "get_home_market_rankings",
+        "get_recommendation_candidates",
         "get_portfolio_summary",
         "add_watchlist_item",
         "remove_watchlist_item",

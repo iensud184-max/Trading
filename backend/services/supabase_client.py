@@ -355,7 +355,7 @@ def upsert_user_api_key(auth_header: str, data: dict):
         query_supabase(auth_header, "user_api_keys", "POST", json_data=data)
 
 def delete_user_api_key(auth_header: str, exchange: str, broker_env: str = "REAL"):
-    """사용자의 지정 거래소 및 broker_env API 키를 user_api_keys 테이블에서 완전 삭제합니다."""
+    """사용자의 지정 거래소 및 broker_env API 키를 user_api_keys 테이블에서 완전 삭제하고 캐시 토큰도 파기합니다."""
     user_id, _ = get_user_id_from_header(auth_header)
     storage_exchange = "BINANCE" if exchange == "BINANCE_UM_FUTURES" else exchange
     params = {
@@ -364,6 +364,13 @@ def delete_user_api_key(auth_header: str, exchange: str, broker_env: str = "REAL
         "broker_env": f"eq.{broker_env}"
     }
     query_supabase(auth_header, "user_api_keys", "DELETE", params=params)
+
+    # 캐시된 토큰 무효화
+    try:
+        from backend.services.token_cache_service import clear_db_token
+        clear_db_token(storage_exchange, broker_env, user_id=user_id)
+    except Exception:
+        pass
 
 SERVICE_ROLE_TIMEOUT_SECONDS = 15
 

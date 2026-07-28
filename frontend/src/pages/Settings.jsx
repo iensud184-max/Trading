@@ -233,7 +233,10 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
       const resData = await response.json()
       if (resData.success) {
         setMessage({ text: resData.message, isError: false })
-        if (exchange === 'TOSS') setTossForm({ client_id: '', client_secret: '', toss_account_seq: '', toss_account_no: '', broker_env: 'REAL' })
+        if (exchange === 'TOSS') {
+          setTossForm({ client_id: '', client_secret: '', toss_account_seq: '', toss_account_no: '', broker_env: 'REAL' })
+          setTossAccounts([])
+        }
         else if (exchange === 'KIS' && brokerEnv === 'MOCK') setKisMockForm({ appkey: '', appsecret: '', cano: '', acnt_prdt_cd: '01', broker_env: 'MOCK' })
         else if (exchange === 'KIS' && brokerEnv === 'REAL') setKisRealForm({ appkey: '', appsecret: '', cano: '', acnt_prdt_cd: '01', broker_env: 'REAL' })
         else if (exchange === 'COINONE') setCoinoneForm({ access_token: '', secret_key: '', broker_env: 'REAL' })

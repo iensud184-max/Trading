@@ -240,7 +240,7 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
         else if (exchange === 'KIS' && brokerEnv === 'MOCK') setKisMockForm({ appkey: '', appsecret: '', cano: '', acnt_prdt_cd: '01', broker_env: 'MOCK' })
         else if (exchange === 'KIS' && brokerEnv === 'REAL') setKisRealForm({ appkey: '', appsecret: '', cano: '', acnt_prdt_cd: '01', broker_env: 'REAL' })
         else if (exchange === 'COINONE') setCoinoneForm({ access_token: '', secret_key: '', broker_env: 'REAL' })
-        else if (exchange === 'BINANCE') setBinanceForm({ api_key: '', secret_key: '', broker_env: 'REAL' })
+        else if (exchange === 'BINANCE') setBinanceForm({ api_key: '', secret_key: '', broker_env: brokerEnv })
         loadKeysStatus()
       } else {
         const message = getApiErrorMessage(resData, '연결 해제에 실패했습니다.')

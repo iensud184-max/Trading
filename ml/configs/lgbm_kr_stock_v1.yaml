@@ -271,14 +271,14 @@ backtest:
   slippage_bps: 12
   top_n: 4
 lightgbm:
-  n_estimators: 119
-  learning_rate: 0.01930559760418981
-  num_leaves: 36
+  n_estimators: 110
+  learning_rate: 0.01982312494643718
+  num_leaves: 54
   max_depth: 3
-  min_child_samples: 65
-  subsample: 0.6301141137019256
-  colsample_bytree: 0.6625717262140922
-  reg_alpha: 0.9196712189057975
-  reg_lambda: 5.371537979834972e-06
+  min_child_samples: 78
+  subsample: 0.6277612792125808
+  colsample_bytree: 0.7501876050390508
+  reg_alpha: 0.001990182916972346
+  reg_lambda: 5.942269194177879e-07
 optional_features:
   dart_features_path: ml/data/raw/dart_features.csv

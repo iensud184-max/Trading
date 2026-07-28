@@ -30,6 +30,20 @@ FUNCTION_SCHEMAS = [
         },
     },
     {
+        "name": "get_recommendation_candidates",
+        "description": "활성 ML(머신러닝) 모델 신호 기반으로 추천 주식, 코인, 오를만한 종목, 해외주식 추천 요청에 대한 후보 종목 목록을 조회합니다. 주식 추천, 해외주식 추천, 오를만한 종목 추천 질문 시 반드시 이 도구를 우선 사용합니다. OpenAI 일반 지식이나 상승률 순위 도구(get_home_market_rankings)로 지어내지 않습니다.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "asset_key": {
+                    "type": "string",
+                    "enum": ["kr_stock", "us_stock", "crypto"],
+                    "description": "추천을 생성할 자산 분류. kr_stock(국내주식), us_stock(해외주식/미국주식), crypto(가상자산/코인)."
+                }
+            }
+        }
+    },
+    {
         "name": "get_portfolio_summary",
         "description": "로그인한 사용자의 개인 거래소 API와 DB를 사용해 평가 자산과 주문가능 현금 요약을 조회합니다.",
         "parameters": {

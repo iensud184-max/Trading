@@ -750,7 +750,8 @@ def build_home_overview(data: dict, auth_header: str | None = None) -> dict:
         )
         if force_refresh and get_toss_env_credentials()["client_id"] and get_toss_env_credentials()["client_secret"]:
             fresh_rows = [row for row in enriched_rows if is_fresh_live_quote(row)]
-            enriched_rows = fresh_rows
+            if fresh_rows:
+                enriched_rows = fresh_rows
         result["stocks"] = apply_stock_filters(
             enriched_rows,
             filters,

@@ -742,11 +742,12 @@ def build_home_overview(data: dict, auth_header: str | None = None) -> dict:
             force_refresh=bool(filters.get("forceRefresh") or data.get("forceRefresh")),
         )
         force_refresh = bool(filters.get("forceRefresh") or data.get("forceRefresh"))
+        # 평시 자동 갱신 시에도 Top 10 상위 종목에 한해 30초 TTL 기반 실시간 시세 조회를 허용하여 체감 시세를 향상
         enriched_rows = enrich_stock_rows_with_toss(
             stock_rows,
             user_id=user_id,
             require_fresh=force_refresh,
-            allow_network=force_refresh,
+            allow_network=True,
         )
         if force_refresh and get_toss_env_credentials()["client_id"] and get_toss_env_credentials()["client_secret"]:
             fresh_rows = [row for row in enriched_rows if is_fresh_live_quote(row)]

@@ -227,12 +227,12 @@ export default function Home({ isLoggedIn, userEmail, handleLogout }) {
     ranking: "거래대금",
   });
   const stocks = useMemo(
-    () => applyClientMarketFilters(stockCandidates, stockFilters).slice(0, 10),
-    [stockCandidates, stockFilters],
+    () => (Array.isArray(stockCandidates) ? stockCandidates.slice(0, 10) : []),
+    [stockCandidates],
   );
   const filteredCoins = useMemo(
-    () => applyClientMarketFilters(coins, coinFilters).slice(0, 10),
-    [coins, coinFilters],
+    () => (Array.isArray(coins) ? coins.slice(0, 10) : []),
+    [coins],
   );
   const stockRankingOptions = stockFilters.region === "해외"
     ? filters.ranking.filter((label) => label !== "거래대금")

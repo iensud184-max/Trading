@@ -358,3 +358,30 @@ def test_keys():
         payload = format_error_payload(e, "연결 테스트 실패", exchange=exchange)
         payload["error_type"] = error_type
         return jsonify(payload), 500
+
+
+@keys_bp.route("/api/keys/delete", methods=["POST", "DELETE"])
+def delete_api_keys():
+    """사용자가 저장한 거래소 API 키 연결을 해제(삭제)합니다."""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return jsonify({"success": False, "message": "인증 헤더가 누락되었습니다."}), 401
+
+    data = request.json or {}
+    exchange = data.get("exchange")
+    broker_env = data.get("broker_env", "REAL")
+
+    if not exchange or exchange not in SUPPORTED_EXCHANGES:
+        return jsonify({"success": False, "message": "올바르지 않은 exchange 구분값입니다."}), 400
+
+    try:
+        from backend.services.supabase_client import delete_user_api_key
+        delete_user_api_key(auth_header, exchange, broker_env)
+        storage_exchange = "BINANCE" if exchange == "BINANCE_UM_FUTURES" else exchange
+        return jsonify({
+            "success": True,
+            "message": f"{storage_exchange} ({broker_env}) API Key 연결이 해제되었습니다."
+        })
+    except Exception as e:
+        return jsonify(format_error_payload(e, "API Key 연결 해제 실패", exchange=exchange)), 500
+

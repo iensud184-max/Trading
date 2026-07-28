@@ -314,11 +314,10 @@ export default function Home({ isLoggedIn, userEmail, handleLogout }) {
         setUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
         setStatus("ready");
       } catch (error) {
-        setStockCandidates([]);
-        setCoins([]);
-        setSnapshotMeta({});
-        setMessage(error.message || "홈 데이터를 불러오지 못했습니다.");
-        setStatus("error");
+        setStockCandidates((prev) => (prev && prev.length > 0 ? prev : []));
+        setCoins((prev) => (prev && prev.length > 0 ? prev : []));
+        setMessage(error.message || "새로고침 중 일시적 오류가 발생하여 기존 데이터를 유지합니다.");
+        setStatus("ready");
       }
     };
 

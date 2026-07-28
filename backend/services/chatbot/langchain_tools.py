@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 _TOOL_FUNCTION_MAP: dict[str, Any] = {
     "get_home_market_rankings": tool_registry.get_home_market_rankings,
+    "get_recommendation_candidates": tool_registry.get_recommendation_candidates,
     "get_portfolio_summary": tool_registry.get_portfolio_summary,
     "add_watchlist_item": tool_registry.add_watchlist_item,
     "remove_watchlist_item": tool_registry.remove_watchlist_item,
@@ -65,6 +66,10 @@ def _build_tool_message(tool_name: str, arguments: dict, fallback_text: str) -> 
         asset_text = "코인" if asset_type == "CRYPTO" else "국내주식" if asset_type == "STOCK" else ""
         ranking = arguments.get("ranking") or "상승률"
         return f"{asset_text} {ranking} 순위"
+    if tool_name == "get_recommendation_candidates":
+        asset_key = str(arguments.get("asset_key") or "").lower()
+        asset_text = "미국주식" if asset_key == "us_stock" else "국내주식" if asset_key == "kr_stock" else "코인" if asset_key == "crypto" else ""
+        return f"{asset_text} 오를만한 추천 주식 알려줘".strip()
     if tool_name == "search_trade_history":
         parts = ["거래내역"]
         if arguments.get("symbol"):

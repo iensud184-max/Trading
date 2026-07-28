@@ -1,4 +1,5 @@
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from backend.services.supabase_client import (
@@ -9,6 +10,16 @@ from backend.utils.crypto_helper import CryptoHelper
 
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "default-dev-encryption-key-32bytes!")
 crypto = CryptoHelper(ENCRYPTION_KEY)
+
+
+def _is_valid_uuid(val: str | None) -> bool:
+    if not val:
+        return False
+    try:
+        uuid.UUID(str(val))
+        return True
+    except ValueError:
+        return False
 
 
 def get_db_token_with_status(
@@ -35,8 +46,9 @@ def get_db_token_with_status(
         "exchange": f"eq.{exchange_upper}",
         "broker_env": f"eq.{env_upper}",
     }
-    if user_id:
-        params["user_id"] = f"eq.{user_id}"
+    valid_user_id = user_id if _is_valid_uuid(user_id) else None
+    if valid_user_id:
+        params["user_id"] = f"eq.{valid_user_id}"
         params["credential_hash"] = "is.null"
     elif credential_hash:
         params["user_id"] = "is.null"
@@ -115,8 +127,9 @@ def set_db_token(
         "expired_at": expired_at_str,
         "updated_at": now_utc.isoformat(),
     }
-    if user_id:
-        payload["user_id"] = user_id
+    valid_user_id = user_id if _is_valid_uuid(user_id) else None
+    if valid_user_id:
+        payload["user_id"] = valid_user_id
         payload["credential_hash"] = None
     elif credential_hash:
         payload["user_id"] = None
@@ -129,8 +142,8 @@ def set_db_token(
         "exchange": f"eq.{exchange_upper}",
         "broker_env": f"eq.{env_upper}",
     }
-    if user_id:
-        params["user_id"] = f"eq.{user_id}"
+    if valid_user_id:
+        params["user_id"] = f"eq.{valid_user_id}"
         params["credential_hash"] = "is.null"
     elif credential_hash:
         params["user_id"] = "is.null"
@@ -163,8 +176,9 @@ def clear_db_token(
         "exchange": f"eq.{exchange_upper}",
         "broker_env": f"eq.{env_upper}",
     }
-    if user_id:
-        params["user_id"] = f"eq.{user_id}"
+    valid_user_id = user_id if _is_valid_uuid(user_id) else None
+    if valid_user_id:
+        params["user_id"] = f"eq.{valid_user_id}"
         params["credential_hash"] = "is.null"
     elif credential_hash:
         params["user_id"] = "is.null"

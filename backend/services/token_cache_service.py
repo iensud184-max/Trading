@@ -49,7 +49,8 @@ def get_db_token_with_status(
     valid_user_id = user_id if _is_valid_uuid(user_id) else None
     if valid_user_id:
         params["user_id"] = f"eq.{valid_user_id}"
-        params["credential_hash"] = "is.null"
+        if credential_hash:
+            params["credential_hash"] = f"eq.{credential_hash}"
     elif credential_hash:
         params["user_id"] = "is.null"
         params["credential_hash"] = f"eq.{credential_hash}"
@@ -130,7 +131,7 @@ def set_db_token(
     valid_user_id = user_id if _is_valid_uuid(user_id) else None
     if valid_user_id:
         payload["user_id"] = valid_user_id
-        payload["credential_hash"] = None
+        payload["credential_hash"] = credential_hash
     elif credential_hash:
         payload["user_id"] = None
         payload["credential_hash"] = credential_hash
@@ -144,7 +145,8 @@ def set_db_token(
     }
     if valid_user_id:
         params["user_id"] = f"eq.{valid_user_id}"
-        params["credential_hash"] = "is.null"
+        if credential_hash:
+            params["credential_hash"] = f"eq.{credential_hash}"
     elif credential_hash:
         params["user_id"] = "is.null"
         params["credential_hash"] = f"eq.{credential_hash}"
@@ -179,7 +181,8 @@ def clear_db_token(
     valid_user_id = user_id if _is_valid_uuid(user_id) else None
     if valid_user_id:
         params["user_id"] = f"eq.{valid_user_id}"
-        params["credential_hash"] = "is.null"
+        if credential_hash:
+            params["credential_hash"] = f"eq.{credential_hash}"
     elif credential_hash:
         params["user_id"] = "is.null"
         params["credential_hash"] = f"eq.{credential_hash}"

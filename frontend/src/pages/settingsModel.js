@@ -169,3 +169,23 @@ export const buildSettingsSavePayloads = (exchange, forms = {}) => {
     testPayload: { exchange },
   }
 }
+
+export const buildSettingsDeletePayload = (exchange, forms = {}) => {
+  if (exchange === 'TOSS') {
+    const { tossForm = {} } = forms
+    return { exchange: 'TOSS', broker_env: tossForm.broker_env || 'REAL' }
+  }
+  if (exchange === 'KIS') {
+    const form = getSelectedKisForm(forms) || {}
+    return { exchange: 'KIS', broker_env: form.broker_env || forms.kisSubTab || 'MOCK' }
+  }
+  if (exchange === 'COINONE') {
+    const { coinoneForm = {} } = forms
+    return { exchange: 'COINONE', broker_env: coinoneForm.broker_env || 'REAL' }
+  }
+  if (exchange === 'BINANCE') {
+    const { binanceForm = {} } = forms
+    return { exchange: 'BINANCE', broker_env: binanceForm.broker_env || 'REAL' }
+  }
+  return { exchange }
+}

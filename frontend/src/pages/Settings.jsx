@@ -206,6 +206,51 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
     }
   }
 
+  // API Key 연결 해제(삭제) 핸들러
+  const handleDeleteKeysDirect = async (exchange, brokerEnv = 'REAL') => {
+    if (!window.confirm(`${exchange} (${brokerEnv}) API Key 연결을 해제(삭제)하시겠습니까?`)) {
+      return
+    }
+
+    setLoading(true)
+    setMessage({ text: 'API Key 연결 해제 처리 중...', isError: false })
+    const authHeader = await getAuthHeader()
+    if (!authHeader) {
+      setMessage({ text: '로그인 세션이 만료되었습니다.', isError: true })
+      setLoading(false)
+      return
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/keys/delete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': authHeader
+        },
+        body: JSON.stringify({ exchange, broker_env: brokerEnv })
+      })
+      const resData = await response.json()
+      if (resData.success) {
+        setMessage({ text: resData.message, isError: false })
+        if (exchange === 'TOSS') setTossForm({ client_id: '', client_secret: '', toss_account_seq: '', toss_account_no: '', broker_env: 'REAL' })
+        else if (exchange === 'KIS' && brokerEnv === 'MOCK') setKisMockForm({ appkey: '', appsecret: '', cano: '', acnt_prdt_cd: '01', broker_env: 'MOCK' })
+        else if (exchange === 'KIS' && brokerEnv === 'REAL') setKisRealForm({ appkey: '', appsecret: '', cano: '', acnt_prdt_cd: '01', broker_env: 'REAL' })
+        else if (exchange === 'COINONE') setCoinoneForm({ access_token: '', secret_key: '', broker_env: 'REAL' })
+        else if (exchange === 'BINANCE') setBinanceForm({ api_key: '', secret_key: '', broker_env: 'REAL' })
+        loadKeysStatus()
+      } else {
+        const message = getApiErrorMessage(resData, '연결 해제에 실패했습니다.')
+        setMessage({ text: formatApiErrorForSettings(message), isError: true })
+      }
+    } catch (error) {
+      const message = getApiErrorMessage(error, '서버 통신에 실패했습니다.')
+      setMessage({ text: formatApiErrorForSettings(message), isError: true })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // API Key 직접 저장 서브 함수
   const saveKeysDirect = async (authHeader, payload) => {
     setMessage({ text: 'API Key 정보를 암호화 저장하는 중...', isError: false })
@@ -421,9 +466,20 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
             <div className={`p-4 rounded border transition-all ${status.TOSS.registered ? 'bg-[#0f1b2b]/50 border-blue-900/60' : 'bg-[#0e0f14]/80 border-slate-800'}`}>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-bold text-white font-mono">TOSS (토스증권)</span>
-                <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold ${status.TOSS.registered ? 'bg-blue-950 text-blue-400 border border-blue-800/80' : 'bg-slate-900 text-slate-500 border border-slate-800'}`}>
-                  {status.TOSS.registered ? '등록됨' : '미등록'}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold ${status.TOSS.registered ? 'bg-blue-950 text-blue-400 border border-blue-800/80' : 'bg-slate-900 text-slate-500 border border-slate-800'}`}>
+                    {status.TOSS.registered ? '등록됨' : '미등록'}
+                  </span>
+                  {status.TOSS.registered && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteKeysDirect('TOSS', 'REAL')}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 font-bold transition cursor-pointer"
+                    >
+                      연결 해제
+                    </button>
+                  )}
+                </div>
               </div>
               {status.TOSS.registered && (
                 <div className="text-[11px] font-mono text-slate-400 flex flex-col gap-1">
@@ -436,9 +492,20 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
             <div className={`p-4 rounded border transition-all ${status.KIS_MOCK?.registered ? 'bg-[#0e211e]/50 border-emerald-900/60' : 'bg-[#0e0f14]/80 border-slate-800'}`}>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-bold text-white font-mono">KIS (한투 모의)</span>
-                <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold ${status.KIS_MOCK?.registered ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/80' : 'bg-slate-900 text-slate-500 border border-slate-800'}`}>
-                  {status.KIS_MOCK?.registered ? '등록됨' : '미등록'}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold ${status.KIS_MOCK?.registered ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/80' : 'bg-slate-900 text-slate-500 border border-slate-800'}`}>
+                    {status.KIS_MOCK?.registered ? '등록됨' : '미등록'}
+                  </span>
+                  {status.KIS_MOCK?.registered && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteKeysDirect('KIS', 'MOCK')}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 font-bold transition cursor-pointer"
+                    >
+                      연결 해제
+                    </button>
+                  )}
+                </div>
               </div>
               {status.KIS_MOCK?.registered && (
                 <div className="text-[11px] font-mono text-slate-400 flex flex-col gap-1">
@@ -452,9 +519,20 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
             <div className={`p-4 rounded border transition-all ${status.KIS_REAL?.registered ? 'bg-[#0e211e]/50 border-emerald-900/60' : 'bg-[#0e0f14]/80 border-slate-800'}`}>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-bold text-white font-mono">KIS (한투 실전)</span>
-                <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold ${status.KIS_REAL?.registered ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/80' : 'bg-slate-900 text-slate-500 border border-slate-800'}`}>
-                  {status.KIS_REAL?.registered ? '등록됨' : '미등록'}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold ${status.KIS_REAL?.registered ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/80' : 'bg-slate-900 text-slate-500 border border-slate-800'}`}>
+                    {status.KIS_REAL?.registered ? '등록됨' : '미등록'}
+                  </span>
+                  {status.KIS_REAL?.registered && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteKeysDirect('KIS', 'REAL')}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 font-bold transition cursor-pointer"
+                    >
+                      연결 해제
+                    </button>
+                  )}
+                </div>
               </div>
               {status.KIS_REAL?.registered && (
                 <div className="text-[11px] font-mono text-slate-400 flex flex-col gap-1">
@@ -468,9 +546,20 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
             <div className={`p-4 rounded border transition-all ${status.COINONE && status.COINONE.registered ? 'bg-[#0e2230]/50 border-sky-900/60' : 'bg-[#0e0f14]/80 border-slate-800'}`}>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-bold text-white font-mono">COINONE (코인원)</span>
-                <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold ${status.COINONE && status.COINONE.registered ? 'bg-sky-950 text-sky-400 border border-sky-800/80' : 'bg-slate-900 text-slate-500 border border-slate-800'}`}>
-                  {status.COINONE && status.COINONE.registered ? '등록됨' : '미등록'}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold ${status.COINONE && status.COINONE.registered ? 'bg-sky-950 text-sky-400 border border-sky-800/80' : 'bg-slate-900 text-slate-500 border border-slate-800'}`}>
+                    {status.COINONE && status.COINONE.registered ? '등록됨' : '미등록'}
+                  </span>
+                  {status.COINONE && status.COINONE.registered && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteKeysDirect('COINONE', 'REAL')}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 font-bold transition cursor-pointer"
+                    >
+                      연결 해제
+                    </button>
+                  )}
+                </div>
               </div>
               {status.COINONE && status.COINONE.registered && (
                 <div className="text-[11px] font-mono text-slate-400 flex flex-col gap-1">
@@ -489,7 +578,18 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
               </div>
               <div className="grid grid-cols-1 gap-2 text-[11px] font-mono text-slate-400 sm:grid-cols-2">
                 <div className={`rounded border px-2 py-2 ${status.BINANCE_REAL?.registered ? 'border-amber-800/60 bg-amber-950/20' : 'border-slate-800 bg-slate-950/20'}`}>
-                  <div className="mb-1 font-bold text-slate-300">REAL 실거래</div>
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="font-bold text-slate-300">REAL 실거래</span>
+                    {status.BINANCE_REAL?.registered && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteKeysDirect('BINANCE', 'REAL')}
+                        className="text-[9px] px-1 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 font-bold transition cursor-pointer"
+                      >
+                        연결 해제
+                      </button>
+                    )}
+                  </div>
                   {status.BINANCE_REAL?.registered ? (
                     <div><span className="text-ai-cyan font-bold">api_key:</span> {status.BINANCE_REAL.access_key}</div>
                   ) : (
@@ -497,7 +597,18 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
                   )}
                 </div>
                 <div className={`rounded border px-2 py-2 ${status.BINANCE_MOCK?.registered ? 'border-emerald-800/60 bg-emerald-950/20' : 'border-slate-800 bg-slate-950/20'}`}>
-                  <div className="mb-1 font-bold text-slate-300">MOCK 모의투자</div>
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="font-bold text-slate-300">MOCK 모의투자</span>
+                    {status.BINANCE_MOCK?.registered && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteKeysDirect('BINANCE', 'MOCK')}
+                        className="text-[9px] px-1 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 font-bold transition cursor-pointer"
+                      >
+                        연결 해제
+                      </button>
+                    )}
+                  </div>
                   {status.BINANCE_MOCK?.registered ? (
                     <div><span className="text-ai-cyan font-bold">api_key:</span> {status.BINANCE_MOCK.access_key}</div>
                   ) : (
@@ -762,7 +873,7 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
                 />
               </div>
 
-              <div className="flex gap-4 mt-2">
+              <div className="flex gap-3 mt-2">
                 <button
                   onClick={() => handleSaveKeys('COINONE')}
                   disabled={loading}
@@ -776,6 +887,13 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
                   className="flex-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-bold py-2.5 rounded transition-all cursor-pointer disabled:opacity-50"
                 >
                   연결 테스트
+                </button>
+                <button
+                  onClick={() => handleDeleteKeysDirect('COINONE', 'REAL')}
+                  disabled={loading}
+                  className="bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 text-rose-200 text-xs font-bold px-4 py-2.5 rounded transition-all cursor-pointer disabled:opacity-50"
+                >
+                  연결 해제
                 </button>
               </div>
             </div>
@@ -837,7 +955,7 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
                 />
               </div>
 
-              <div className="flex gap-4 mt-2">
+              <div className="flex gap-3 mt-2">
                 <button
                   onClick={() => handleSaveKeys('BINANCE')}
                   disabled={loading}
@@ -851,6 +969,13 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
                   className="flex-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-bold py-2.5 rounded transition-all cursor-pointer disabled:opacity-50"
                 >
                   연결 테스트
+                </button>
+                <button
+                  onClick={() => handleDeleteKeysDirect('BINANCE', binanceForm.broker_env || 'REAL')}
+                  disabled={loading}
+                  className="bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 text-rose-200 text-xs font-bold px-4 py-2.5 rounded transition-all cursor-pointer disabled:opacity-50"
+                >
+                  연결 해제
                 </button>
               </div>
             </div>

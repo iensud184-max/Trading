@@ -278,7 +278,13 @@ export default function MarketRankings({ isLoggedIn, userEmail, handleLogout }) 
         }
 
         const response = await fetch(`${API_BASE_URL}/api/market/rankings?${params.toString()}`)
-        const payload = await response.json()
+        const text = await response.text()
+        let payload
+        try {
+          payload = JSON.parse(text)
+        } catch {
+          throw new Error('랭킹 서버 응답을 처리하지 못했습니다. (서버 응답 오류)')
+        }
 
         if (!response.ok || !payload.success) {
           throw new Error(payload.message || '랭킹 데이터를 불러오지 못했습니다.')

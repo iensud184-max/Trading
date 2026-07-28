@@ -576,23 +576,23 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
               )}
             </div>
 
-            {/* Binance 현황 */}
-            <div className={`p-4 rounded border transition-all ${status.BINANCE && status.BINANCE.registered ? 'bg-[#292215]/50 border-amber-900/60' : 'bg-[#0e0f14]/80 border-slate-800'}`}>
+            {/* Binance 현황 (2컬럼 확장) */}
+            <div className={`p-4 rounded border transition-all col-span-1 sm:col-span-2 lg:col-span-2 ${status.BINANCE && status.BINANCE.registered ? 'bg-[#292215]/50 border-amber-900/60' : 'bg-[#0e0f14]/80 border-slate-800'}`}>
               <div className="flex justify-between items-center mb-2">
                 <span className="text-sm font-bold text-white font-mono">BINANCE (바이낸스)</span>
                 <span className={`text-[10px] px-2 py-0.5 rounded font-extrabold ${status.BINANCE && status.BINANCE.registered ? 'bg-amber-950 text-amber-400 border border-amber-800/80' : 'bg-slate-900 text-slate-500 border border-slate-800'}`}>
                   {status.BINANCE && status.BINANCE.registered ? '등록됨' : '미등록'}
                 </span>
               </div>
-              <div className="grid grid-cols-1 gap-2 text-[11px] font-mono text-slate-400 sm:grid-cols-2">
-                <div className={`rounded border px-2 py-2 ${status.BINANCE_REAL?.registered ? 'border-amber-800/60 bg-amber-950/20' : 'border-slate-800 bg-slate-950/20'}`}>
-                  <div className="flex justify-between items-center mb-1">
+              <div className="grid grid-cols-1 gap-3 text-[11px] font-mono text-slate-400 sm:grid-cols-2">
+                <div className={`rounded border px-3 py-2.5 ${status.BINANCE_REAL?.registered ? 'border-amber-800/60 bg-amber-950/20' : 'border-slate-800 bg-slate-950/20'}`}>
+                  <div className="flex justify-between items-center mb-1.5">
                     <span className="font-bold text-slate-300">REAL 실거래</span>
                     {status.BINANCE_REAL?.registered && (
                       <button
                         type="button"
                         onClick={() => handleDeleteKeysDirect('BINANCE', 'REAL')}
-                        className="text-[9px] px-1 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 font-bold transition cursor-pointer"
+                        className="text-[11px] px-2 py-0.5 rounded bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800/70 font-bold transition cursor-pointer whitespace-nowrap"
                       >
                         연결 해제
                       </button>
@@ -604,14 +604,14 @@ export default function Settings({ isLoggedIn, userEmail, handleLogout, userProf
                     <div className="text-slate-600">미등록</div>
                   )}
                 </div>
-                <div className={`rounded border px-2 py-2 ${status.BINANCE_MOCK?.registered ? 'border-emerald-800/60 bg-emerald-950/20' : 'border-slate-800 bg-slate-950/20'}`}>
-                  <div className="flex justify-between items-center mb-1">
+                <div className={`rounded border px-3 py-2.5 ${status.BINANCE_MOCK?.registered ? 'border-emerald-800/60 bg-emerald-950/20' : 'border-slate-800 bg-slate-950/20'}`}>
+                  <div className="flex justify-between items-center mb-1.5">
                     <span className="font-bold text-slate-300">MOCK 모의투자</span>
                     {status.BINANCE_MOCK?.registered && (
                       <button
                         type="button"
                         onClick={() => handleDeleteKeysDirect('BINANCE', 'MOCK')}
-                        className="text-[9px] px-1 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 font-bold transition cursor-pointer"
+                        className="text-[11px] px-2 py-0.5 rounded bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800/70 font-bold transition cursor-pointer whitespace-nowrap"
                       >
                         연결 해제
                       </button>
